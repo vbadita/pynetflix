@@ -21,6 +21,11 @@ def connect(username,password):
     login_button.click()
     return driver
 
+def get_history(connected, profile):
+    #to be done
+
+
+
 
 
 if __name__ == '__main__':
