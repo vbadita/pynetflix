@@ -1,13 +1,23 @@
 from selenium import webdriver
 import os
+import csv
 
 username = os.environ['NETFLIX_EMAIL']
 password = os.environ['NETFLIX_PASSWORD']
 
+profile = webdriver.FirefoxProfile()
+#profile.set_preference('browser.download.folderList', 2) # custom location
+#profile.set_preference('browser.download.manager.showWhenStarting', False)
+#profile.set_preference('browser.download.dir', '/tmp')
+profile.set_preference('browser.helperApps.neverAsk.saveToDisk', 'text/csv')
+
+driver = webdriver.Firefox(profile)
+netflix_page = "https://netflix.com"
+netflix_activity_page = "https://www.netflix.com/viewingactivity"
+
 def connect(username,password):
-    driver = webdriver.Firefox()
     driver.implicitly_wait(3)
-    driver.get("https://netflix.com")
+    driver.get(netflix_page)
     menu =  driver.find_element_by_class_name('authLinks')
     actions = webdriver.ActionChains(driver)
     actions.move_to_element(menu)
@@ -21,12 +31,16 @@ def connect(username,password):
     login_button.click()
     return driver
 
-def get_history(connected, profile):
-    #to be done
-
-
-
+def get_history(profile):
+    profile_to_click = driver.find_element_by_xpath(f"//span[@class='profile-name' and contains(text(),'{profile}')]")
+    profile_to_click.click()
+    driver.get(netflix_activity_page)
+    activity_button = driver.find_element_by_class_name("viewing-activity-footer-download")
+    activity_button.click()
+    download_page = driver.find_element_by_class_name("modal-action-button")
+    download_page.click()
 
 
 if __name__ == '__main__':
     netflix_connected = connect(username,password)
+    get_history("valentin")
