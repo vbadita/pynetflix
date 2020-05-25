@@ -2,10 +2,20 @@ from selenium import webdriver
 import os
 import csv
 import time
+from argparse import ArgumentParser
+
+parser = ArgumentParser(description='Get Netflix account viewing history')
+parser.add_argument('account', help='Netflix account to be used with script')
+
+args = parser.parse_args()
+
+if "NETFLIX_EMAIL" and "NETFLIX_PASSWORD" not in os.environ:
+    print("Please set environment variables for NETFLIX_EMAIL AND NETFLIX_PASSWORD")
+    sys.exit(0)
 
 username = os.environ['NETFLIX_EMAIL']
 password = os.environ['NETFLIX_PASSWORD']
-account = os.environ['NETFLIX_ACCOUNT']
+account = args.account
 
 
 profile = webdriver.FirefoxProfile()
@@ -41,17 +51,15 @@ def connect(username,password):
     return driver
 
 
-def get_history(profile):
-    profile_to_click = driver.find_element_by_xpath(f"//span[@class='profile-name' and contains(text(),'{profile}')]")
+def get_history(account):
+    profile_to_click = driver.find_element_by_xpath(f"//span[@class='profile-name' and contains(text(),'{account}')]")
     profile_to_click.click()
     driver.get(netflix_activity_page)
     activity_button = driver.find_element_by_class_name("viewing-activity-footer-download")
     activity_button.click()
-    # Below code not needed - downloads file twice in case needed later
-    # download_page = driver.find_element_by_class_name("modal-action-button")
-    # download_page.click()
 
 
 if __name__ == '__main__':
     netflix_connected = connect(username,password)
     get_history(account)
+    driver.quit()
