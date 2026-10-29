@@ -84,12 +84,13 @@ Availability differs by country, so set `NETFLIX_COUNTRY` to your account's coun
 | `check-availability` | Re-check which watched titles are still on Netflix |
 | `removed` / `leaving` | Titles that left Netflix / have an announced last day |
 | `history` / `export` | Query or dump your history (JSON / CSV) |
+| `ratings` | Your thumbs down / up / "love this" ratings, imported from the data export |
 | `wrapped` | Spotify-Wrapped-style recap per year or month, with a shareable HTML page |
 | `abandoned` | Shows you stopped watching, flagging those with a new season out |
 | `shared` | Overlap between profiles and "watch together" suggestions |
 | `letterboxd OUT.csv` | Letterboxd import file (movies) |
 | `trakt login` / `trakt push` | Sync history to Trakt (needs `TRAKT_CLIENT_ID` / `TRAKT_CLIENT_SECRET`) |
-| `serve` | REST API (FastAPI): `/profiles`, `/history`, `/titles`, `/titles/removed`, `/wrapped`, ... |
+| `serve` | REST API (FastAPI): `/profiles`, `/history`, `/titles`, `/titles/removed`, `/ratings`, `/wrapped`, ... |
 | `mcp` | MCP server for assistants |
 
 ### Use it from Claude

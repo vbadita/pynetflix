@@ -64,6 +64,10 @@ def main(argv: list[str] | None = None) -> None:
     p.add_argument("out", type=Path)
     p.add_argument("--profile")
 
+    p = sub.add_parser("ratings", help="your thumbs up/down ratings (from the data export)")
+    p.add_argument("--profile")
+    p.add_argument("--rating", type=int, choices=[-1, 1, 2], help="-1 down, 1 up, 2 love this")
+
     p = sub.add_parser("wrapped", help="yearly/monthly recap")
     p.add_argument("--profile"); p.add_argument("--year", type=int); p.add_argument("--month", type=int)
     p.add_argument("--html", type=Path, help="write a shareable HTML page here")
@@ -97,6 +101,9 @@ def main(argv: list[str] | None = None) -> None:
         is_export = args.file.suffix.lower() == ".zip" or args.file.name == "ViewingActivity.csv"
         if is_export:
             result = importers.import_data_export(conn, args.file)
+            rated = importers.import_ratings(conn, args.file)
+            if rated:
+                print(f"{rated} ratings imported")
         else:
             if not args.profile:
                 sys.exit("Viewing Activity CSVs don't include the profile name: pass --profile NAME")
@@ -158,6 +165,9 @@ def main(argv: list[str] | None = None) -> None:
             print(f"Wrote {args.html}")
         else:
             _print(w)
+
+    elif args.cmd == "ratings":
+        _print(stats.ratings(conn, profile=args.profile, rating=args.rating))
 
     elif args.cmd == "abandoned":
         _print(stats.abandoned(conn, profile=args.profile, idle_days=args.idle_days))

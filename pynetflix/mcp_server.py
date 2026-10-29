@@ -34,6 +34,11 @@ def build_server(db_path: str | None = None):
                              search=search, limit=min(limit, 500))
 
     @server.tool()
+    def ratings(profile: str | None = None, rating: int | None = None) -> list[dict]:
+        """Thumbs ratings: -1 thumbs down, 1 thumbs up, 2 love this. Filter by profile or rating."""
+        return stats.ratings(conn, profile=profile, rating=rating)
+
+    @server.tool()
     def wrapped(profile: str | None = None, year: int | None = None, month: int | None = None) -> dict:
         """Yearly or monthly recap: hours, top titles and genres, streaks, binges."""
         return stats.wrapped(conn, profile=profile, year=year, month=month)
