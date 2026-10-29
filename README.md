@@ -78,6 +78,7 @@ Availability differs by country, so set `NETFLIX_COUNTRY` to your account's coun
 
 | command | what it does |
 |---|---|
+| `status` | What's loaded, what's been removed, and what to run next |
 | `import FILE` | Viewing Activity CSV (`--profile` needed) or the personal-data export ZIP |
 | `login` / `sync` | Log in once in a real browser window, then pull history for all profiles |
 | `enrich` | TMDB genres, cast, runtime, season/episode counts, episode numbers, availability |
