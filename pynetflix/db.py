@@ -66,6 +66,14 @@ CREATE TABLE IF NOT EXISTS viewings (
 CREATE INDEX IF NOT EXISTS viewings_by_date ON viewings (profile_id, watched_on);
 CREATE INDEX IF NOT EXISTS viewings_by_title ON viewings (title_id);
 
+CREATE TABLE IF NOT EXISTS ratings (
+    profile_id  INTEGER NOT NULL REFERENCES profiles(id),
+    title_id    INTEGER NOT NULL REFERENCES titles(id),
+    rating      INTEGER NOT NULL,                -- -1 thumbs down, 1 thumbs up, 2 love this
+    rated_at    TEXT,
+    PRIMARY KEY (profile_id, title_id)
+);
+
 -- Titles first guessed wrong ("Show: Episode" parsed as a movie) and later corrected.
 CREATE TABLE IF NOT EXISTS title_aliases (
     normalized_name TEXT PRIMARY KEY,
@@ -156,6 +164,8 @@ def merge_movie_into_series(conn: sqlite3.Connection, title_id: int) -> int | No
             conn.execute("UPDATE viewings SET title_id = ?, episode_title = ?, dedup_key = ? WHERE id = ?",
                          (series_id, episode, key, v["id"]))
     conn.execute("DELETE FROM availability_log WHERE title_id = ?", (title_id,))
+    conn.execute("UPDATE OR IGNORE ratings SET title_id = ? WHERE title_id = ?", (series_id, title_id))
+    conn.execute("DELETE FROM ratings WHERE title_id = ?", (title_id,))
     conn.execute("UPDATE title_aliases SET title_id = ? WHERE title_id = ?", (series_id, title_id))
     conn.execute("DELETE FROM titles WHERE id = ?", (title_id,))
     conn.execute("INSERT OR REPLACE INTO title_aliases (normalized_name, title_id) VALUES (?, ?)",

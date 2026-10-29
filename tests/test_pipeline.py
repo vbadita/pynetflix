@@ -98,3 +98,13 @@ def test_movie_with_colon_reclassified_as_series(conn):
         assert conn.execute("SELECT COUNT(*) FROM titles").fetchone()[0] == 1
     finally:
         path.unlink()
+
+
+def test_ratings_import(conn):
+    from pynetflix.importers import import_ratings
+    import_data_export(conn, FIXTURES / "netflix-report.zip")
+    assert import_ratings(conn, FIXTURES / "netflix-report.zip") == 3  # star-only row skipped
+    loved = stats.ratings(conn, rating=2)
+    assert [(r["profile"], r["title"]) for r in loved] == [("Valentin", "Dark")]
+    irishman = [h for h in stats.history(conn, search="Irishman")]
+    assert {h["profile"]: h["rating"] for h in irishman} == {"Valentin": -1, "Kids": 1}

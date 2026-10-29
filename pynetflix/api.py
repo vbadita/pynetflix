@@ -30,6 +30,10 @@ def create_app(db_path: str | None = None) -> FastAPI:
                             limit: int = Query(100, le=1000), offset: int = 0):
         return stats.history(conn, profile=profile, since=since, until=until, limit=limit, offset=offset)
 
+    @app.get("/ratings")
+    def get_ratings(profile: str | None = None, rating: int | None = Query(None, ge=-1, le=2)):
+        return stats.ratings(conn, profile=profile, rating=rating)
+
     @app.get("/titles")
     def get_titles(status: str | None = Query(None, pattern="^(available|removed|unknown)$"),
                    kind: str | None = Query(None, pattern="^(movie|series)$"),

@@ -67,14 +67,46 @@ def import_viewing_activity_csv(conn: sqlite3.Connection, path: Path | str, prof
     return result
 
 
-def _open_export_csv(path: Path) -> io.TextIOBase:
+def _open_export_csv(path: Path, filename: str = "ViewingActivity.csv") -> io.TextIOBase | None:
     if zipfile.is_zipfile(path):
         zf = zipfile.ZipFile(path)
-        name = next((n for n in zf.namelist() if n.endswith("ViewingActivity.csv")), None)
+        name = next((n for n in zf.namelist() if n.endswith(filename)), None)
         if not name:
-            raise ValueError("No ViewingActivity.csv found in the export ZIP")
+            return None
         return io.TextIOWrapper(zf.open(name), encoding="utf-8-sig", newline="")
+    if path.name != filename:
+        return None
     return open(path, newline="", encoding="utf-8-sig")
+
+
+# Netflix's "Thumbs Value": 1 = thumbs down, 2 = thumbs up, 3 = two thumbs up ("love this").
+THUMBS = {"1": -1, "2": 1, "3": 2}
+
+
+def import_ratings(conn: sqlite3.Connection, path: Path | str) -> int:
+    """Import thumbs ratings from the export's Ratings.csv. Returns how many were stored."""
+    f = _open_export_csv(Path(path), "Ratings.csv")
+    if f is None:
+        return 0
+    stored = 0
+    with f, conn:
+        for r in csv.DictReader(f):
+            rating = THUMBS.get((r.get("Thumbs Value") or "").strip())
+            name = (r.get("Title Name") or "").strip()
+            if rating is None or not name:
+                continue
+            parsed = parse_title(name)
+            title_id = db.get_or_create_title(conn, parsed)
+            profile_id = db.get_or_create_profile(conn, r["Profile Name"])
+            rated_at = (r.get("Event Utc Ts") or "").strip() or None
+            conn.execute(
+                "INSERT INTO ratings (profile_id, title_id, rating, rated_at) VALUES (?, ?, ?, ?) "
+                "ON CONFLICT (profile_id, title_id) DO UPDATE SET rating = excluded.rating, "
+                "rated_at = excluded.rated_at WHERE excluded.rated_at >= COALESCE(ratings.rated_at, '')",
+                (profile_id, title_id, rating, rated_at),
+            )
+            stored += 1
+    return stored
 
 
 def import_data_export(conn: sqlite3.Connection, path: Path | str,
@@ -84,7 +116,10 @@ def import_data_export(conn: sqlite3.Connection, path: Path | str,
     # Netflix logs one row per playback session; fold sessions of the same episode on the
     # same day into one viewing so it lines up with the CSV and sync sources.
     grouped: dict[tuple, dict] = {}
-    with _open_export_csv(Path(path)) as f:
+    f = _open_export_csv(Path(path))
+    if f is None:
+        raise ValueError("No ViewingActivity.csv found in the export")
+    with f:
         for r in csv.DictReader(f):
             if (r.get("Supplemental Video Type") or "").strip():
                 result.skipped += 1  # trailers, hooks, teasers

@@ -35,12 +35,27 @@ def history(conn: sqlite3.Connection, profile: str | None = None, since: str | N
                t.id AS title_id, t.name AS title, t.kind, v.season_number, v.season_label,
                v.episode_title, v.episode_number, v.device, t.genres, t.year,
                t.netflix_status, COALESCE(t.netflix_removed_on, t.netflix_removed_detected_at)
-                   AS removed_from_netflix, t.netflix_leaving_on
+                   AS removed_from_netflix, t.netflix_leaving_on, r.rating
         FROM viewings v JOIN profiles p ON p.id = v.profile_id JOIN titles t ON t.id = v.title_id
+        LEFT JOIN ratings r ON r.profile_id = v.profile_id AND r.title_id = v.title_id
         {"WHERE " + " AND ".join(where) if where else ""}
         ORDER BY v.watched_on DESC, v.watched_at DESC, v.id DESC
         LIMIT ? OFFSET ?"""
     return [db.row_to_dict(r) for r in conn.execute(sql, params + [limit, offset])]
+
+
+def ratings(conn: sqlite3.Connection, profile: str | None = None, rating: int | None = None) -> list[dict]:
+    where, params = [], []
+    if profile:
+        where.append("p.name = ?"); params.append(profile)
+    if rating is not None:
+        where.append("r.rating = ?"); params.append(rating)
+    sql = f"""SELECT p.name AS profile, t.id AS title_id, t.name AS title, t.kind, r.rating, r.rated_at,
+                     t.netflix_status
+              FROM ratings r JOIN profiles p ON p.id = r.profile_id JOIN titles t ON t.id = r.title_id
+              {"WHERE " + " AND ".join(where) if where else ""}
+              ORDER BY r.rated_at DESC"""
+    return [dict(r) for r in conn.execute(sql, params)]
 
 
 def title(conn: sqlite3.Connection, title_id: int) -> dict | None:
