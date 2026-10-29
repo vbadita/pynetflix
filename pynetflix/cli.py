@@ -31,6 +31,8 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("--db", help="database path (default ~/.pynetflix/pynetflix.db)")
     sub = parser.add_subparsers(dest="cmd", required=True)
 
+    sub.add_parser("status", help="what's in the database and what to do next")
+
     p = sub.add_parser("import", help="import a Viewing Activity CSV or the personal data export ZIP")
     p.add_argument("file", type=Path)
     p.add_argument("--profile", help="profile name (required for Viewing Activity CSVs)")
@@ -94,7 +96,17 @@ def main(argv: list[str] | None = None) -> None:
     db_path = args.db or str(cfg.db_path)
     conn = db.connect(db_path)
 
-    if args.cmd == "import":
+    if args.cmd == "status":
+        st = stats.status(conn)
+        st["database"] = db_path
+        st["logged_in"] = cfg.session_path.exists()
+        _print(st)
+        if not st["viewings"]:
+            print("\nNext: pynetflix import <file>  or  pynetflix login && pynetflix sync")
+        elif st["not_enriched"]:
+            print("\nNext: pynetflix enrich  (needs TMDB_API_KEY)")
+
+    elif args.cmd == "import":
         from . import importers
         if not args.file.exists():
             sys.exit(f"File not found: {args.file}")

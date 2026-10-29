@@ -33,6 +33,8 @@ def test_rest_api(tmp_path):
     assert client.get("/wrapped", params={"year": 2024}).json()["titles"] == 3
     assert "Wrapped" in client.get("/wrapped.html", params={"year": 2024}).text
     assert client.get("/titles/9999").status_code == 404
+    st = client.get("/status").json()
+    assert st["profiles"] == 2 and st["removed_from_netflix"] == 1 and st["not_enriched"] == 0
 
 
 def test_cli_export_has_removed_column(tmp_path, monkeypatch):

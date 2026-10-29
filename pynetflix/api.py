@@ -14,6 +14,10 @@ def create_app(db_path: str | None = None) -> FastAPI:
     app = FastAPI(title="pynetflix", version=__version__,
                   description="Your Netflix viewing history as a local API.")
 
+    @app.get("/status")
+    def get_status():
+        return stats.status(conn)
+
     @app.get("/profiles")
     def get_profiles():
         return stats.profiles(conn)

@@ -16,6 +16,25 @@ def profiles(conn: sqlite3.Connection) -> list[dict]:
            GROUP BY p.id ORDER BY p.name""")]
 
 
+def status(conn: sqlite3.Connection) -> dict:
+    """Overview of what's in the database and what still needs doing."""
+    one = lambda sql: conn.execute(sql).fetchone()[0]  # noqa: E731
+    return {
+        "profiles": one("SELECT COUNT(*) FROM profiles"),
+        "viewings": one("SELECT COUNT(*) FROM viewings"),
+        "first_watched": one("SELECT MIN(watched_on) FROM viewings"),
+        "last_watched": one("SELECT MAX(watched_on) FROM viewings"),
+        "titles": one("SELECT COUNT(*) FROM titles"),
+        "not_enriched": one("SELECT COUNT(*) FROM titles WHERE enriched_at IS NULL"),
+        "not_found_on_tmdb": one("SELECT COUNT(*) FROM titles WHERE enriched_at IS NOT NULL AND tmdb_id IS NULL"),
+        "on_netflix": one("SELECT COUNT(*) FROM titles WHERE netflix_status = 'available'"),
+        "removed_from_netflix": one("SELECT COUNT(*) FROM titles WHERE netflix_status = 'removed'"),
+        "last_availability_check": one("SELECT MAX(availability_checked_at) FROM titles"),
+        "ratings": one("SELECT COUNT(*) FROM ratings"),
+        "sources": {r[0]: r[1] for r in conn.execute("SELECT source, COUNT(*) FROM viewings GROUP BY source")},
+    }
+
+
 def history(conn: sqlite3.Connection, profile: str | None = None, since: str | None = None,
             until: str | None = None, kind: str | None = None, search: str | None = None,
             limit: int = 100, offset: int = 0) -> list[dict]:
