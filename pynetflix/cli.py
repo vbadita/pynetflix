@@ -182,6 +182,7 @@ def main(argv: list[str] | None = None) -> None:
 
     elif args.cmd == "serve":
         import uvicorn
+
         from .api import create_app
         uvicorn.run(create_app(db_path), host=args.host, port=args.port)
 

@@ -39,7 +39,6 @@ ITEMS = {
 
 
 def test_sync_against_mock(tmp_path, monkeypatch):
-    from playwright.sync_api import sync_playwright
 
     session = tmp_path / "session.json"
     session.write_text(json.dumps({"cookies": [], "origins": []}))

@@ -18,7 +18,7 @@ from pathlib import Path
 
 from . import db
 from .availability import record_leaving_notice
-from .parsing import ParsedTitle, season_number_from_label, parse_title
+from .parsing import ParsedTitle, parse_title, season_number_from_label
 
 NETFLIX = "https://www.netflix.com"
 # Profile GUIDs show up in account-page links such as /settings/viewed/<GUID>.
