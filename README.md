@@ -120,7 +120,8 @@ profile's viewing-activity page in a headless browser.
 
 Netflix changes its website without notice, so all of that logic lives in
 `pynetflix/sync.py`. If sync breaks, that is the file to fix, and the file imports keep working
-in the meantime. PIN-locked profiles are not supported yet.
+in the meantime. If a profile is PIN-locked, `sync` finishes the other profiles first, then opens
+a visible browser window so you can type the PIN yourself (pynetflix never sees or stores it).
 
 Netflix's terms of use don't allow automated access. Use sync only on your own account, and
 don't run it as a service for others. The import commands use files Netflix gives you and don't
