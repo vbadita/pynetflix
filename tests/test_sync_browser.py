@@ -38,6 +38,99 @@ ITEMS = {
 }
 
 
+PIN_HTML = """<html><body><h1>Profile Lock</h1><input data-uia="pin-input"></body></html>"""
+
+
+_REAL_PLAYWRIGHT = sync._playwright
+
+
+def _wrapped(handler):
+    real = _REAL_PLAYWRIGHT
+
+    class Wrapped:
+        def __enter__(self):
+            self.cm = real()
+            p = self.cm.__enter__()
+            launch = p.chromium.launch
+
+            def patched_launch(**kw):
+                if os.environ.get("PW_CHROMIUM"):
+                    kw["executable_path"] = os.environ["PW_CHROMIUM"]
+                browser = launch(**kw)
+                new_context = browser.new_context
+
+                def ctx(**ckw):
+                    c = new_context(**ckw)
+                    c.route("https://www.netflix.com/**", handler)
+                    return c
+                browser.new_context = ctx
+                return browser
+            p.chromium.launch = patched_launch
+            return p
+
+        def __exit__(self, *a):
+            return self.cm.__exit__(*a)
+
+    return Wrapped()
+
+
+def test_sync_pin_locked_profile(tmp_path, monkeypatch):
+    session = tmp_path / "session.json"
+    session.write_text(json.dumps({"cookies": [], "origins": []}))
+    visits = {"locked": 0}
+
+    def handler(route):
+        url = route.request.url
+        if url.endswith("/account/profiles"):
+            return route.fulfill(body=PROFILES_HTML, content_type="text/html")
+        if "/settings/viewed/EEEE" in url:
+            visits["locked"] += 1
+            # First visit (headless pass) hits the PIN prompt; the retry is "after typing the PIN".
+            body = PIN_HTML if visits["locked"] == 1 else ACTIVITY_HTML
+            return route.fulfill(body=body, content_type="text/html")
+        if "/settings/viewed/" in url:
+            return route.fulfill(body=ACTIVITY_HTML, content_type="text/html")
+        if "viewingactivity" in url:
+            item = {"title": "The Irishman", "movieID": 2, "date": 1706817600000, "duration": 100}
+            return route.fulfill(body=json.dumps({"viewedItems": [item], "hasMore": False}),
+                                 content_type="application/json")
+        return route.fulfill(status=404, body="")
+
+    monkeypatch.setattr(sync, "_playwright", lambda: _wrapped(handler))
+    monkeypatch.setattr(sync, "FIRST_RESPONSE_TIMEOUT_MS", 2_000)
+    conn = db.connect(tmp_path / "p.db")
+    r = sync.sync(conn, session, pin_headless=True)
+    assert r.profiles == ["Valentin (1 items)", "Kids (1 items)"]
+    assert visits["locked"] == 2
+
+
+def test_sync_pin_not_entered_is_skipped(tmp_path, monkeypatch):
+    session = tmp_path / "session.json"
+    session.write_text(json.dumps({"cookies": [], "origins": []}))
+
+    def handler(route):
+        url = route.request.url
+        if url.endswith("/account/profiles"):
+            return route.fulfill(body=PROFILES_HTML, content_type="text/html")
+        if "/settings/viewed/EEEE" in url:
+            return route.fulfill(body=PIN_HTML, content_type="text/html")
+        if "/settings/viewed/" in url:
+            return route.fulfill(body=ACTIVITY_HTML, content_type="text/html")
+        if "viewingactivity" in url:
+            item = {"title": "The Irishman", "movieID": 2, "date": 1706817600000, "duration": 100}
+            return route.fulfill(body=json.dumps({"viewedItems": [item], "hasMore": False}),
+                                 content_type="application/json")
+        return route.fulfill(status=404, body="")
+
+    monkeypatch.setattr(sync, "_playwright", lambda: _wrapped(handler))
+    monkeypatch.setattr(sync, "PIN_WAIT_MINUTES", 0.02)
+    monkeypatch.setattr(sync, "FIRST_RESPONSE_TIMEOUT_MS", 2_000)
+    conn = db.connect(tmp_path / "p.db")
+    r = sync.sync(conn, session, pin_headless=True)
+    assert r.profiles[0] == "Valentin (1 items)"
+    assert r.profiles[1].startswith("Kids (skipped")
+
+
 def test_sync_against_mock(tmp_path, monkeypatch):
 
     session = tmp_path / "session.json"

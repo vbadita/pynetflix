@@ -23,6 +23,11 @@ from .parsing import ParsedTitle, parse_title, season_number_from_label
 NETFLIX = "https://www.netflix.com"
 # Profile GUIDs show up in account-page links such as /settings/viewed/<GUID>.
 _GUID_RE = re.compile(r"/(?:settings/[a-z]+|account/profiles?|profiles/manage)/([A-Z0-9]{16,})")
+# What Netflix shows instead of the viewing activity when a profile is PIN-locked.
+_PIN_SELECTOR = '[data-uia*="pin"], input[name="pin"], input[autocomplete="one-time-code"]'
+_PIN_TEXT_RE = re.compile(r"profile lock|enter your pin", re.I)
+PIN_WAIT_MINUTES = 5
+FIRST_RESPONSE_TIMEOUT_MS = 30_000
 _LEAVING_RE = re.compile(r"Last day to watch(?: on Netflix)?:?\s*([A-Z][a-z]+ \d{1,2}(?:, \d{4})?)")
 
 
@@ -47,6 +52,10 @@ def login(session_path: Path, timeout_minutes: int = 10) -> None:
         session_path.chmod(0o600)
         browser.close()
     print(f"Session saved to {session_path}")
+
+
+class PinRequired(Exception):
+    """The profile is PIN-locked and nobody was there to type the PIN."""
 
 
 @dataclass
@@ -108,8 +117,18 @@ def _discover_profiles(page) -> list[tuple[str, str | None]]:
     return [(name, guid) for guid, name in found.items()]
 
 
-def _collect_viewing_activity(page, url: str, max_pages: int) -> list[dict]:
-    """Open the viewing-activity page and gather every JSON payload with 'viewedItems'."""
+def _is_pin_prompt(page) -> bool:
+    if "/pin" in page.url.lower() or page.locator(_PIN_SELECTOR).count():
+        return True
+    return bool(_PIN_TEXT_RE.search(page.content()))
+
+
+def _collect_viewing_activity(page, url: str, max_pages: int, pin_wait_ms: int | None = None) -> list[dict]:
+    """Open the viewing-activity page and gather every JSON payload with 'viewedItems'.
+
+    Without `pin_wait_ms` a PIN prompt raises PinRequired. With it, we wait that long for
+    the user to type the PIN into the (visible) browser window.
+    """
     items: list[dict] = []
 
     def viewed_items(response) -> list | None:
@@ -126,8 +145,17 @@ def _collect_viewing_activity(page, url: str, max_pages: int) -> list[dict]:
     def is_activity(response) -> bool:
         return viewed_items(response) is not None
 
-    with page.expect_response(is_activity, timeout=30_000) as first:
-        page.goto(url)
+    try:
+        with page.expect_response(is_activity, timeout=FIRST_RESPONSE_TIMEOUT_MS) as first:
+            page.goto(url)
+    except Exception:
+        if not _is_pin_prompt(page):
+            raise
+        if pin_wait_ms is None:
+            raise PinRequired(url) from None
+        print("This profile is PIN-locked: type the PIN in the browser window...")
+        with page.expect_response(is_activity, timeout=pin_wait_ms) as first:
+            pass
     items.extend(viewed_items(first.value))
     for _ in range(max_pages):
         more = page.get_by_role("button", name=re.compile(r"show more", re.I))
@@ -172,8 +200,19 @@ def _check_leaving(conn: sqlite3.Connection, page, limit: int) -> int:
     return found
 
 
+def _sync_profile(conn, page, name, guid, max_pages, result, pin_wait_ms=None) -> None:
+    url = f"{NETFLIX}/settings/viewed/{guid}" if guid else f"{NETFLIX}/viewingactivity"
+    items = _collect_viewing_activity(page, url, max_pages, pin_wait_ms)
+    profile_id = db.get_or_create_profile(conn, name, guid)
+    _store_items(conn, profile_id, items, result)
+    result.profiles.append(f"{name} ({len(items)} items)")
+
+
 def sync(conn: sqlite3.Connection, session_path: Path, profiles: list[str] | None = None,
-         max_pages: int = 200, check_leaving: int = 0, headless: bool = True) -> SyncResult:
+         max_pages: int = 200, check_leaving: int = 0, headless: bool = True,
+         pin_headless: bool = False) -> SyncResult:
+    """Sync every profile. PIN-locked ones are retried at the end in a visible window
+    (`pin_headless` exists for tests only), where you type the PIN yourself."""
     if not session_path.exists():
         raise SystemExit("No saved session. Run: pynetflix login")
     result = SyncResult()
@@ -189,12 +228,23 @@ def sync(conn: sqlite3.Connection, session_path: Path, profiles: list[str] | Non
             # Couldn't read the profile list; fall back to whichever profile is active.
             targets = [((profiles or ["default"])[0], None)]
 
+        locked: list[tuple[str, str | None]] = []
         for name, guid in targets:
-            url = f"{NETFLIX}/settings/viewed/{guid}" if guid else f"{NETFLIX}/viewingactivity"
-            items = _collect_viewing_activity(page, url, max_pages)
-            profile_id = db.get_or_create_profile(conn, name, guid)
-            _store_items(conn, profile_id, items, result)
-            result.profiles.append(f"{name} ({len(items)} items)")
+            try:
+                _sync_profile(conn, page, name, guid, max_pages, result)
+            except PinRequired:
+                locked.append((name, guid))
+
+        if locked:
+            print(f"PIN-locked profiles: {', '.join(n for n, _ in locked)}. Opening a browser window...")
+            pin_browser = p.chromium.launch(headless=pin_headless)
+            pin_page = pin_browser.new_context(storage_state=str(session_path)).new_page()
+            for name, guid in locked:
+                try:
+                    _sync_profile(conn, pin_page, name, guid, max_pages, result, PIN_WAIT_MINUTES * 60_000)
+                except Exception as e:
+                    result.profiles.append(f"{name} (skipped: PIN not entered, {type(e).__name__})")
+            pin_browser.close()
 
         if check_leaving:
             result.leaving_notices = _check_leaving(conn, page, check_leaving)
