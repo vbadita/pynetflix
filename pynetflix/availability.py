@@ -109,3 +109,26 @@ def leaving_soon(conn: sqlite3.Connection) -> list[dict]:
     return [db.row_to_dict(r) for r in conn.execute(
         "SELECT * FROM titles_view WHERE netflix_leaving_on >= date('now') "
         "AND netflix_status != 'removed' ORDER BY netflix_leaving_on")]
+
+
+def watch(conn: sqlite3.Connection, tmdb: TMDB, country: str) -> dict:
+    """Run an availability check and report what changed: titles that newly left Netflix,
+    titles that came back, and titles with an announced last day."""
+    def statuses() -> dict[int, str]:
+        return {r["id"]: r["netflix_status"] for r in conn.execute("SELECT id, netflix_status FROM titles")}
+
+    before = statuses()
+    result = check_availability(conn, tmdb, country)
+    after = statuses()
+    left = [i for i, s in after.items() if s == "removed" and before.get(i) != "removed"]
+    back = [i for i, s in after.items() if s == "available" and before.get(i) == "removed"]
+
+    def titles(ids: list[int]) -> list[dict]:
+        if not ids:
+            return []
+        marks = ",".join("?" * len(ids))
+        return [db.row_to_dict(r) for r in conn.execute(
+            f"SELECT * FROM titles_view WHERE id IN ({marks}) ORDER BY name", ids)]
+
+    return {"checked": result.checked, "newly_left": titles(left), "back_on_netflix": titles(back),
+            "leaving_soon": leaving_soon(conn)}

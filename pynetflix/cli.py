@@ -52,6 +52,9 @@ def main(argv: list[str] | None = None) -> None:
 
     sub.add_parser("check-availability", help="re-check which watched titles are still on Netflix")
 
+    p = sub.add_parser("watch", help="daily routine: sync (if logged in), check availability, report changes")
+    p.add_argument("--no-sync", action="store_true", help="skip the netflix.com sync")
+
     p = sub.add_parser("removed", help="titles you watched that left Netflix")
     p.add_argument("--profile")
 
@@ -145,6 +148,24 @@ def main(argv: list[str] | None = None) -> None:
         r = check_availability(conn, _tmdb(cfg), cfg.country)
         print(f"Checked {r.checked} titles in {cfg.country}: {r.still_available} on Netflix, "
               f"{r.newly_removed} newly removed, {r.back_on_netflix} back on Netflix")
+
+    elif args.cmd == "watch":
+        from .availability import watch
+        if not args.no_sync and cfg.session_path.exists():
+            from .sync import sync
+            try:
+                r = sync(conn, cfg.session_path)
+                print(f"Sync: {r.added} new viewings from {', '.join(r.profiles)}")
+            except Exception as e:  # sync breaks when Netflix changes its site; keep watching
+                print(f"Sync failed ({e}); continuing with availability check", file=sys.stderr)
+        report = watch(conn, _tmdb(cfg), cfg.country)
+        print(f"Checked {report['checked']} titles in {cfg.country}.")
+        for heading, key, date_key in [("Newly left Netflix", "newly_left", "removed_from_netflix"),
+                                       ("Back on Netflix", "back_on_netflix", None),
+                                       ("Leaving soon", "leaving_soon", "netflix_leaving_on")]:
+            print(f"\n{heading}: {len(report[key]) or 'none'}")
+            for t in report[key]:
+                print(f"  {t[date_key] + '  ' if date_key and t.get(date_key) else ''}{t['name']}")
 
     elif args.cmd == "removed":
         from .availability import removed_titles
