@@ -108,3 +108,25 @@ def test_ratings_import(conn):
     assert [(r["profile"], r["title"]) for r in loved] == [("Valentin", "Dark")]
     irishman = [h for h in stats.history(conn, search="Irishman")]
     assert {h["profile"]: h["rating"] for h in irishman} == {"Valentin": -1, "Kids": 1}
+
+
+def test_watch_reports_changes(conn):
+    from pynetflix.availability import record_leaving_notice, watch
+    import_viewing_activity_csv(conn, FIXTURES / "NetflixViewingHistory.csv", "Valentin")
+    tmdb = FakeTMDB(available={"dark", "stranger things", "our planet", "mission impossible", "the irishman"})
+    enrich_titles(conn, tmdb, "RO")
+    assert watch(conn, tmdb, "RO")["newly_left"] == []
+
+    tmdb.available.discard("dark")
+    dark_id = conn.execute("SELECT id FROM titles WHERE name = 'Dark'").fetchone()[0]
+    stranger_id = conn.execute("SELECT id FROM titles WHERE name = 'Stranger Things'").fetchone()[0]
+    record_leaving_notice(conn, stranger_id, "2999-01-01")
+    report = watch(conn, tmdb, "RO")
+    assert [t["name"] for t in report["newly_left"]] == ["Dark"]
+    assert [t["name"] for t in report["leaving_soon"]] == ["Stranger Things"]
+    # Already reported once: the next run doesn't list it as new again.
+    assert watch(conn, tmdb, "RO")["newly_left"] == []
+
+    tmdb.available.add("dark")
+    assert [t["name"] for t in watch(conn, tmdb, "RO")["back_on_netflix"]] == ["Dark"]
+    assert dark_id

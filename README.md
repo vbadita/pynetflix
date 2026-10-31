@@ -71,6 +71,14 @@ Run `check-availability` daily and the removal window shrinks to a single day:
 0 9 * * * TMDB_API_KEY=... NETFLIX_COUNTRY=RO pynetflix check-availability
 ```
 
+`pynetflix watch` does the whole daily routine in one command: it syncs (if you ran `login`),
+re-checks availability, then prints what newly left Netflix, what came back and what is leaving
+soon. Use it in cron instead of `check-availability`:
+
+```bash
+0 9 * * * TMDB_API_KEY=... NETFLIX_COUNTRY=RO pynetflix watch   # cron mails the output to you
+```
+
 On the first run, titles removed long ago get a wide window, from your last watch to today.
 Availability differs by country, so set `NETFLIX_COUNTRY` to your account's country.
 
@@ -83,6 +91,7 @@ Availability differs by country, so set `NETFLIX_COUNTRY` to your account's coun
 | `login` / `sync` | Log in once in a real browser window, then pull history for all profiles |
 | `enrich` | TMDB genres, cast, runtime, season/episode counts, episode numbers, availability |
 | `check-availability` | Re-check which watched titles are still on Netflix |
+| `watch` | Daily routine: sync (if logged in) + check availability, then report what newly left / is leaving soon |
 | `removed` / `leaving` | Titles that left Netflix / have an announced last day |
 | `history` / `export` | Query or dump your history (JSON / CSV) |
 | `ratings` | Your thumbs down / up / "love this" ratings, imported from the data export |
