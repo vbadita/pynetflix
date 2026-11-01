@@ -138,19 +138,22 @@ def main(argv: list[str] | None = None) -> None:
             print(f"{r.leaving_notices} 'last day to watch' notices found")
 
     elif args.cmd == "enrich":
+        from .availability import resolve_country
         from .enrich import enrich_titles
-        r = enrich_titles(conn, _tmdb(cfg), cfg.country, refresh=args.refresh, limit=args.limit)
+        country = resolve_country(conn, cfg.country)
+        r = enrich_titles(conn, _tmdb(cfg), country, refresh=args.refresh, limit=args.limit)
         print(f"{r.enriched} enriched, {r.not_found} not found on TMDB, "
               f"{r.reclassified} re-classified as series")
 
     elif args.cmd == "check-availability":
-        from .availability import check_availability
-        r = check_availability(conn, _tmdb(cfg), cfg.country)
-        print(f"Checked {r.checked} titles in {cfg.country}: {r.still_available} on Netflix, "
+        from .availability import check_availability, resolve_country
+        country = resolve_country(conn, cfg.country)
+        r = check_availability(conn, _tmdb(cfg), country)
+        print(f"Checked {r.checked} titles in {country}: {r.still_available} on Netflix, "
               f"{r.newly_removed} newly removed, {r.back_on_netflix} back on Netflix")
 
     elif args.cmd == "watch":
-        from .availability import watch
+        from .availability import resolve_country, watch
         if not args.no_sync and cfg.session_path.exists():
             from .sync import sync
             try:
@@ -158,8 +161,9 @@ def main(argv: list[str] | None = None) -> None:
                 print(f"Sync: {r.added} new viewings from {', '.join(r.profiles)}")
             except Exception as e:  # sync breaks when Netflix changes its site; keep watching
                 print(f"Sync failed ({e}); continuing with availability check", file=sys.stderr)
-        report = watch(conn, _tmdb(cfg), cfg.country)
-        print(f"Checked {report['checked']} titles in {cfg.country}.")
+        country = resolve_country(conn, cfg.country)
+        report = watch(conn, _tmdb(cfg), country)
+        print(f"Checked {report['checked']} titles in {country}.")
         for heading, key, date_key in [("Newly left Netflix", "newly_left", "removed_from_netflix"),
                                        ("Back on Netflix", "back_on_netflix", None),
                                        ("Leaving soon", "leaving_soon", "netflix_leaving_on")]:

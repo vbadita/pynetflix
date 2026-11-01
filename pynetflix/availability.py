@@ -70,6 +70,17 @@ class AvailabilityResult:
     back_on_netflix: int = 0
 
 
+def resolve_country(conn: sqlite3.Connection, configured: str | None, default: str = "US") -> str:
+    """Country to check availability in: NETFLIX_COUNTRY if set, otherwise the country your
+    viewings were recorded in (the most common one in the data export), otherwise ``default``."""
+    if configured:
+        return configured.upper()
+    row = conn.execute(
+        "SELECT country FROM viewings WHERE country IS NOT NULL AND country != '' "
+        "GROUP BY country ORDER BY COUNT(*) DESC, MAX(watched_on) DESC LIMIT 1").fetchone()
+    return row["country"].upper() if row else default
+
+
 def check_availability(conn: sqlite3.Connection, tmdb: TMDB, country: str,
                        only_status: str | None = None) -> AvailabilityResult:
     """Re-check every enriched title against TMDB's Netflix listing for ``country``."""

@@ -130,3 +130,11 @@ def test_watch_reports_changes(conn):
     tmdb.available.add("dark")
     assert [t["name"] for t in watch(conn, tmdb, "RO")["back_on_netflix"]] == ["Dark"]
     assert dark_id
+
+
+def test_resolve_country(conn):
+    from pynetflix.availability import resolve_country
+    assert resolve_country(conn, None) == "US"  # nothing imported yet
+    import_data_export(conn, FIXTURES / "netflix-report.zip")
+    assert resolve_country(conn, None) == "RO"  # taken from the export's viewings
+    assert resolve_country(conn, "de") == "DE"  # explicit setting wins

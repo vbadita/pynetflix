@@ -9,7 +9,7 @@ from pathlib import Path
 class Config:
     home: Path
     tmdb_api_key: str | None
-    country: str
+    country: str | None  # None when NETFLIX_COUNTRY is not set
     trakt_client_id: str | None
     trakt_client_secret: str | None
 
@@ -32,8 +32,9 @@ def load_config() -> Config:
     return Config(
         home=home,
         tmdb_api_key=os.environ.get("TMDB_API_KEY"),
-        # ISO 3166-1 country used for Netflix availability checks.
-        country=os.environ.get("NETFLIX_COUNTRY", "US").upper(),
+        # ISO 3166-1 country used for Netflix availability checks. When unset, the country
+        # recorded in the data export's viewings is used (see availability.resolve_country).
+        country=(os.environ.get("NETFLIX_COUNTRY") or "").strip().upper() or None,
         trakt_client_id=os.environ.get("TRAKT_CLIENT_ID"),
         trakt_client_secret=os.environ.get("TRAKT_CLIENT_SECRET"),
     )
