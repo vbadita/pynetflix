@@ -18,7 +18,7 @@ Get a free TMDB API key at https://www.themoviedb.org/settings/api, then:
 
 ```bash
 export TMDB_API_KEY=...            # v3 key or v4 read token
-export NETFLIX_COUNTRY=RO          # the country your Netflix account is in (default US)
+export NETFLIX_COUNTRY=RO          # optional: defaults to the country in your data export (else US)
 ```
 
 ## Quick start
@@ -80,7 +80,8 @@ soon. Use it in cron instead of `check-availability`:
 ```
 
 On the first run, titles removed long ago get a wide window, from your last watch to today.
-Availability differs by country, so set `NETFLIX_COUNTRY` to your account's country.
+Availability differs by country. Unless `NETFLIX_COUNTRY` is set, pynetflix uses the country most common in
+your imported data-export viewings (falling back to `US` when there are none).
 
 ## Features
 
