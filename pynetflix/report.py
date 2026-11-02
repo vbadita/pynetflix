@@ -17,7 +17,13 @@ def _bars(items: list[dict], label: str, value: str, unit: str) -> str:
     return "<ul class='bars'>" + "".join(rows) + "</ul>"
 
 
-def render_wrapped(w: dict) -> str:
+def _nav(links: list[tuple[str, str | None]]) -> str:
+    items = [f"<a href='{escape(url, quote=True)}'>{escape(text)}</a>" for text, url in links if url]
+    return "<nav>" + " ".join(items) + "</nav>" if items else ""
+
+
+def render_wrapped(w: dict, links: list[tuple[str, str | None]] | None = None) -> str:
+    """`links` is an optional list of (text, url) shown as navigation (used when served by the API)."""
     who = escape(w["profile"] or "Everyone")
     period = f"{w['period']['from']} → {w['period']['to']}"
     binge = w["biggest_binge"]
@@ -55,6 +61,7 @@ main {{ max-width:760px; margin:0 auto; padding:32px 16px 64px; }}
 h1 {{ font-size:2.2rem; margin:0; }} h1 span {{ color:var(--accent); }}
 h2 {{ margin-top:2rem; font-size:1.15rem; }}
 .muted {{ color:var(--muted); }}
+nav {{ display:flex; gap:16px; margin-bottom:16px; }} nav a {{ color:var(--accent); text-decoration:none; }}
 .tiles {{ display:grid; grid-template-columns:repeat(auto-fit, minmax(150px, 1fr)); gap:12px; margin-top:24px; }}
 .tile {{ background:var(--card); border-radius:12px; padding:14px 16px; }}
 .tile .k {{ color:var(--muted); font-size:.85rem; }} .tile .v {{ font-size:1.5rem; font-weight:700; }}
@@ -66,6 +73,7 @@ h2 {{ margin-top:2rem; font-size:1.15rem; }}
 .val {{ color:var(--muted); font-variant-numeric:tabular-nums; font-size:.9rem; }}
 </style></head>
 <body><main>
+{_nav(links or [])}
 <h1><span>Wrapped</span> · {who}</h1>
 <p class="muted">{period}</p>
 <div class="tiles">{tiles_html}</div>

@@ -101,7 +101,7 @@ your imported data-export viewings (falling back to `US` when there are none).
 | `shared` | Overlap between profiles and "watch together" suggestions |
 | `letterboxd OUT.csv` | Letterboxd import file (movies) |
 | `trakt login` / `trakt push` | Sync history to Trakt (needs `TRAKT_CLIENT_ID` / `TRAKT_CLIENT_SECRET`) |
-| `serve` | REST API (FastAPI): `/profiles`, `/history`, `/titles`, `/titles/removed`, `/ratings`, `/wrapped`, ... |
+| `serve` | REST API (FastAPI): `/profiles`, `/history`, `/titles`, `/titles/removed`, `/ratings`, `/wrapped`, `/wrapped.html` (with previous/next month and year links), ... |
 | `mcp` | MCP server for assistants |
 
 ### Use it from Claude

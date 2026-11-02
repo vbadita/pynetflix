@@ -160,6 +160,8 @@ def wrapped(conn: sqlite3.Connection, profile: str | None = None, year: int | No
     late_night = sum(c for h, c in hours.items() if h >= 23 or h < 4)
     return {
         "period": {"from": start.isoformat(), "to": end.isoformat()},
+        "year": year,
+        "month": month,
         "profile": profile,
         "total_hours": round(total / 3600, 1),
         "viewings": len(rows),
