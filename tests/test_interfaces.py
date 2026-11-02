@@ -23,7 +23,7 @@ def _seeded(tmp_path):
 
 
 def test_rest_api(tmp_path):
-    path, _ = _seeded(tmp_path)
+    path, conn = _seeded(tmp_path)
     client = TestClient(create_app(str(path)))
     assert {p["name"] for p in client.get("/profiles").json()} == {"Valentin", "Kids"}
     hist = client.get("/profiles/Valentin/history").json()
@@ -32,6 +32,13 @@ def test_rest_api(tmp_path):
     assert [t["name"] for t in removed] == ["The Irishman"]
     assert client.get("/wrapped", params={"year": 2024}).json()["titles"] == 3
     assert "Wrapped" in client.get("/wrapped.html", params={"year": 2024}).text
+    month_page = client.get("/wrapped.html", params={"year": 2024, "month": 3, "profile": "Valentin"}).text
+    assert "year=2024&amp;month=2&amp;profile=Valentin" in month_page
+    assert "month=4" in month_page and "2024 in full" in month_page
+    jan = client.get("/wrapped.html", params={"year": 2024, "month": 1}).text
+    assert "year=2023&amp;month=12" in jan
+    year_page = client.get("/wrapped.html", params={"year": 2024}).text
+    assert "Previous year" in year_page and "year=2023" in year_page
     assert client.get("/titles/9999").status_code == 404
     st = client.get("/status").json()
     assert st["profiles"] == 2 and st["removed_from_netflix"] == 1 and st["not_enriched"] == 0

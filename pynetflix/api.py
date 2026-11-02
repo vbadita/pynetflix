@@ -1,5 +1,8 @@
 """Local REST API over your Netflix data.  Run with: pynetflix serve"""
 
+from datetime import date
+from urllib.parse import urlencode
+
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.responses import HTMLResponse
 
@@ -7,6 +10,28 @@ from . import __version__, db, stats
 from .availability import leaving_soon, removed_titles
 from .config import load_config
 from .report import render_wrapped
+
+
+def _wrapped_links(w: dict) -> list[tuple[str, str | None]]:
+    """Previous/next navigation for the Wrapped page: months in a month view, years in a year view."""
+    def url(year: int, month: int | None = None) -> str:
+        q = {"year": year}
+        if month:
+            q["month"] = month
+        if w["profile"]:
+            q["profile"] = w["profile"]
+        return "/wrapped.html?" + urlencode(q)
+
+    today = date.today()
+    year, month = w["year"], w["month"]
+    if month:
+        py, pm = (year - 1, 12) if month == 1 else (year, month - 1)
+        ny, nm = (year + 1, 1) if month == 12 else (year, month + 1)
+        future = (ny, nm) > (today.year, today.month)
+        return [("← Previous month", url(py, pm)), (f"{year} in full", url(year)),
+                ("Next month →", None if future else url(ny, nm))]
+    return [("← Previous year", url(year - 1)),
+            ("Next year →", None if year >= today.year else url(year + 1))]
 
 
 def create_app(db_path: str | None = None) -> FastAPI:
@@ -67,7 +92,8 @@ def create_app(db_path: str | None = None) -> FastAPI:
     @app.get("/wrapped.html", response_class=HTMLResponse)
     def get_wrapped_html(profile: str | None = None, year: int | None = None,
                          month: int | None = Query(None, ge=1, le=12)):
-        return render_wrapped(stats.wrapped(conn, profile=profile, year=year, month=month))
+        w = stats.wrapped(conn, profile=profile, year=year, month=month)
+        return render_wrapped(w, links=_wrapped_links(w))
 
     @app.get("/abandoned")
     def get_abandoned(profile: str | None = None, idle_days: int = 60):
