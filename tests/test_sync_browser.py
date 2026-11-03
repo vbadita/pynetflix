@@ -27,7 +27,8 @@ def activity_page(pages, lang="ro"):
             f'const rest = {json.dumps([rows(b) for b in rest])};'
             f'document.getElementById("more").onclick = () => {{'
             f'document.querySelector("ul").insertAdjacentHTML("beforeend", rest.shift());'
-            f'if (!rest.length) document.getElementById("more").style.display = "none"; }};'
+            f'if (!rest.length) {{ const b = document.getElementById("more");'
+            f' b.disabled = true; b.className += " disabled"; }} }};'
             f'</script></body></html>')
 
 
@@ -175,6 +176,24 @@ def test_sync_against_mock(tmp_path, monkeypatch):
     assert [h["title"] for h in hist] == ["Dark", "The Irishman"]
     assert [h["watched_on"] for h in hist] == ["2024-03-15", "2024-02-02"]
     assert hist[0]["season_number"] == 1
+
+
+def test_sync_stops_at_disabled_more_button(tmp_path, monkeypatch):
+    # After the last batch Netflix keeps the button visible but disabled; sync must not hang on it.
+    session = tmp_path / "session.json"
+    session.write_text(json.dumps({"cookies": [], "origins": []}))
+    pages = [[("1.1.24", 1, "A Movie")], [("2.1.24", 2, "B Movie")], [("3.1.24", 3, "C Movie")]]
+
+    def handler(route):
+        if route.request.url.endswith("/account/profiles"):
+            return route.fulfill(body='<a href="/settings/viewed/AAAABBBBCCCCDDDD1111">Valentin</a>',
+                                 content_type="text/html")
+        return route.fulfill(body=activity_page(pages), content_type="text/html")
+
+    monkeypatch.setattr(sync, "_playwright", lambda: _wrapped(handler))
+    monkeypatch.setattr(sync, "MORE_ENABLE_WAIT_MS", 500)
+    r = sync.sync(db.connect(tmp_path / "d.db"), session)
+    assert r.profiles == ["Valentin (3 items)"]
 
 
 def test_sync_reports_unexpected_page(tmp_path, monkeypatch):

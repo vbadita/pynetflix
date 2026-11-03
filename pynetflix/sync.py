@@ -28,6 +28,7 @@ _PIN_SELECTOR = '[data-uia*="pin"], input[name="pin"], input[autocomplete="one-t
 _PIN_TEXT_RE = re.compile(r"profile lock|enter your pin", re.I)
 PIN_WAIT_MINUTES = 5
 FIRST_ROWS_TIMEOUT_MS = 30_000
+MORE_ENABLE_WAIT_MS = 4_000
 _LEAVING_RE = re.compile(r"Last day to watch(?: on Netflix)?:?\s*([A-Z][a-z]+ \d{1,2}(?:, \d{4})?)")
 
 
@@ -172,9 +173,22 @@ def _read_rows(page) -> list[dict]:
 
 
 def _more_button(page):
+    """The "show more" button if there is more to load, else None.
+
+    Netflix greys the button out (disabled) once the history is complete, and may also do it
+    briefly while loading. So a disabled button gets a few seconds to come back before we stop.
+    """
     for loc in (page.locator(_MORE_SELECTOR), page.get_by_role("button", name=_MORE_TEXT_RE)):
-        if loc.count() and loc.first.is_visible():
-            return loc.first
+        if not (loc.count() and loc.first.is_visible()):
+            continue
+        button = loc.first
+        if button.is_enabled():
+            return button
+        try:
+            page.wait_for_function("el => !el.disabled", arg=button.element_handle(), timeout=MORE_ENABLE_WAIT_MS)
+            return button
+        except Exception:
+            return None
     return None
 
 
@@ -204,7 +218,10 @@ def _collect_viewing_activity(page, url: str, max_pages: int, pin_wait_ms: int |
         if more is None:
             break
         before = len(_read_rows(page))
-        more.click()
+        try:
+            more.click(timeout=10_000)
+        except Exception:
+            break
         try:  # wait for the new rows, so a slow page is never cut short or mixed with the next profile
             page.wait_for_function(
                 "([sel, n]) => document.querySelectorAll(sel).length > n",
