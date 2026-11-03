@@ -1,6 +1,7 @@
 """Send your history elsewhere: Letterboxd (CSV import) and Trakt (API sync)."""
 
 import csv
+import io
 import json
 import sqlite3
 import time
@@ -9,6 +10,22 @@ from pathlib import Path
 import requests
 
 TRAKT_API = "https://api.trakt.tv"
+
+EXPORT_COLUMNS = ["profile", "watched_on", "watched_at", "title", "kind", "season_number",
+                  "episode_number", "episode_title", "duration_seconds", "device", "year",
+                  "netflix_status", "removed_from_netflix", "netflix_leaving_on"]
+
+
+def history_to_csv(rows: list[dict], fileobj) -> None:
+    w = csv.DictWriter(fileobj, fieldnames=EXPORT_COLUMNS, extrasaction="ignore")
+    w.writeheader()
+    w.writerows(rows)
+
+
+def history_csv_text(rows: list[dict]) -> str:
+    buf = io.StringIO()
+    history_to_csv(rows, buf)
+    return buf.getvalue()
 
 
 def export_letterboxd(conn: sqlite3.Connection, out: Path | str, profile: str | None = None) -> int:

@@ -35,6 +35,7 @@ pynetflix enrich
 # 3. Use it
 pynetflix removed                    # what you watched that's no longer on Netflix
 pynetflix export history.csv         # full history incl. the removed_from_netflix column
+pynetflix export history.json        # same, as JSON (or pass --format json)
 pynetflix wrapped --year 2026 --html wrapped.html
 pynetflix serve                      # REST API on http://127.0.0.1:8000 (docs at /docs)
 ```
@@ -94,7 +95,7 @@ your imported data-export viewings (falling back to `US` when there are none).
 | `check-availability` | Re-check which watched titles are still on Netflix |
 | `watch` | Daily routine: sync (if logged in) + check availability, then report what newly left / is leaving soon |
 | `removed` / `leaving` | Titles that left Netflix / have an announced last day |
-| `history` / `export` | Query or dump your history (JSON / CSV) |
+| `history` / `export` | Query or dump your history (`export` writes CSV or JSON; the API serves CSV at `/export.csv`) |
 | `ratings` | Your thumbs down / up / "love this" ratings, imported from the data export |
 | `wrapped` | Spotify-Wrapped-style recap per year or month, with a shareable HTML page |
 | `abandoned` | Shows you stopped watching, flagging those with a new season out |

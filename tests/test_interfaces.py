@@ -1,5 +1,7 @@
 import asyncio
 import csv
+import io
+import json
 
 from conftest import FIXTURES, FakeTMDB
 from fastapi.testclient import TestClient
@@ -53,6 +55,23 @@ def test_cli_export_has_removed_column(tmp_path, monkeypatch):
     irishman = [r for r in rows if r["title"] == "The Irishman"]
     assert irishman and all(r["removed_from_netflix"] for r in irishman)
     assert all(not r["removed_from_netflix"] for r in rows if r["title"] == "Dark")
+
+
+def test_cli_export_json_and_api_csv(tmp_path):
+    path, _ = _seeded(tmp_path)
+    out = tmp_path / "history.json"
+    cli.main(["--db", str(path), "export", str(out)])
+    rows = json.loads(out.read_text())
+    assert any(r["title"] == "The Irishman" and r["removed_from_netflix"] for r in rows)
+    forced = tmp_path / "h.txt"
+    cli.main(["--db", str(path), "export", str(forced), "--format", "json"])
+    assert len(json.loads(forced.read_text())) == len(rows)
+
+    resp = TestClient(create_app(str(path))).get("/export.csv", params={"profile": "Valentin"})
+    assert resp.headers["content-type"].startswith("text/csv")
+    csv_rows = list(csv.DictReader(io.StringIO(resp.text)))
+    assert csv_rows and {r["profile"] for r in csv_rows} == {"Valentin"}
+    assert "removed_from_netflix" in csv_rows[0]
 
 
 def test_letterboxd_and_report(tmp_path):
