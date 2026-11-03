@@ -14,28 +14,33 @@ PROFILES_HTML = """<html><body>
 <a href="/settings/viewed/EEEEFFFFGGGGHHHH2222">Kids</a>
 </body></html>"""
 
-ACTIVITY_HTML = """<html><body><ul id="list"></ul>
-<button id="more" style="display:none">Show More</button>
-<script>
-let page = 0;
-async function load() {
-  const r = await fetch('/api/shakti/test/viewingactivity?pg=' + page);
-  const body = await r.json();
-  document.getElementById('more').style.display = body.hasMore ? 'block' : 'none';
-  page++;
-}
-document.getElementById('more').onclick = load;
-load();
-</script></body></html>"""
+def activity_page(pages, lang="ro"):
+    """A viewing-activity page like Netflix's: rows in the HTML, 'show more' appends the next batch."""
+    def rows(batch):
+        return "".join(
+            f'<li class="retableRow" data-uia="activity-row"><div class="col date nowrap">{d}</div>'
+            f'<div class="col title"><a href="/title/{vid}">{t}</a></div></li>' for d, vid, t in batch)
+    first, rest = pages[0], pages[1:]
+    return (f'<html lang="{lang}"><body><ul class="retable">{rows(first)}</ul>'
+            f'<button class="btn btn-blue btn-small" id="more" style="display:{"block" if rest else "none"}">'
+            f'Afișează mai multe</button><script>'
+            f'const rest = {json.dumps([rows(b) for b in rest])};'
+            f'document.getElementById("more").onclick = () => {{'
+            f'document.querySelector("ul").insertAdjacentHTML("beforeend", rest.shift());'
+            f'if (!rest.length) {{ const b = document.getElementById("more");'
+            f' b.disabled = true; b.className += " disabled"; }} }};'
+            f'</script></body></html>')
 
-ITEMS = {
+
+# (date as shown, netflix id of the watched video, title) in Romanian day.month.year format
+PAGES = {
     "AAAABBBBCCCCDDDD1111": [
-        [{"title": "Dark: Season 1: Secrets", "seriesTitle": "Dark", "series": 1, "seasonDescriptor": "Season 1",
-          "episodeTitle": "Secrets", "date": 1710532860000, "duration": 3060}],
-        [{"title": "The Irishman", "movieID": 2, "date": 1706817600000, "duration": 12540}],
+        [("15.3.24", 70, "Dark: Sezonul 1: Secrets")],
+        [("2.2.24", 2, "The Irishman")],
     ],
-    "EEEEFFFFGGGGHHHH2222": [[{"title": "The Irishman", "movieID": 2, "date": 1706904000000, "duration": 100}]],
+    "EEEEFFFFGGGGHHHH2222": [[("3.2.24", 2, "The Irishman")]],
 }
+ACTIVITY_HTML = activity_page(PAGES["EEEEFFFFGGGGHHHH2222"])
 
 
 PIN_HTML = """<html><body><h1>Profile Lock</h1><input data-uia="pin-input"></body></html>"""
@@ -90,14 +95,10 @@ def test_sync_pin_locked_profile(tmp_path, monkeypatch):
             return route.fulfill(body=body, content_type="text/html")
         if "/settings/viewed/" in url:
             return route.fulfill(body=ACTIVITY_HTML, content_type="text/html")
-        if "viewingactivity" in url:
-            item = {"title": "The Irishman", "movieID": 2, "date": 1706817600000, "duration": 100}
-            return route.fulfill(body=json.dumps({"viewedItems": [item], "hasMore": False}),
-                                 content_type="application/json")
         return route.fulfill(status=404, body="")
 
     monkeypatch.setattr(sync, "_playwright", lambda: _wrapped(handler))
-    monkeypatch.setattr(sync, "FIRST_RESPONSE_TIMEOUT_MS", 2_000)
+    monkeypatch.setattr(sync, "FIRST_ROWS_TIMEOUT_MS", 2_000)
     conn = db.connect(tmp_path / "p.db")
     r = sync.sync(conn, session, pin_headless=True)
     assert r.profiles == ["Valentin (1 items)", "Kids (1 items)"]
@@ -116,15 +117,11 @@ def test_sync_pin_not_entered_is_skipped(tmp_path, monkeypatch):
             return route.fulfill(body=PIN_HTML, content_type="text/html")
         if "/settings/viewed/" in url:
             return route.fulfill(body=ACTIVITY_HTML, content_type="text/html")
-        if "viewingactivity" in url:
-            item = {"title": "The Irishman", "movieID": 2, "date": 1706817600000, "duration": 100}
-            return route.fulfill(body=json.dumps({"viewedItems": [item], "hasMore": False}),
-                                 content_type="application/json")
         return route.fulfill(status=404, body="")
 
     monkeypatch.setattr(sync, "_playwright", lambda: _wrapped(handler))
     monkeypatch.setattr(sync, "PIN_WAIT_MINUTES", 0.02)
-    monkeypatch.setattr(sync, "FIRST_RESPONSE_TIMEOUT_MS", 2_000)
+    monkeypatch.setattr(sync, "FIRST_ROWS_TIMEOUT_MS", 2_000)
     conn = db.connect(tmp_path / "p.db")
     r = sync.sync(conn, session, pin_headless=True)
     assert r.profiles[0] == "Valentin (1 items)"
@@ -135,20 +132,13 @@ def test_sync_against_mock(tmp_path, monkeypatch):
 
     session = tmp_path / "session.json"
     session.write_text(json.dumps({"cookies": [], "origins": []}))
-    state = {"guid": None}
 
     def handler(route):
         url = route.request.url
         if url.endswith("/account/profiles"):
             return route.fulfill(body=PROFILES_HTML, content_type="text/html")
         if "/settings/viewed/" in url:
-            state["guid"] = url.rsplit("/", 1)[1]
-            return route.fulfill(body=ACTIVITY_HTML, content_type="text/html")
-        if "viewingactivity" in url:
-            pages = ITEMS[state["guid"]]
-            pg = int(url.split("pg=")[1])
-            body = {"viewedItems": pages[pg], "hasMore": pg + 1 < len(pages)}
-            return route.fulfill(body=json.dumps(body), content_type="application/json")
+            return route.fulfill(body=activity_page(PAGES[url.rsplit("/", 1)[1]]), content_type="text/html")
         return route.fulfill(status=404, body="")
 
     real = sync._playwright
@@ -184,4 +174,50 @@ def test_sync_against_mock(tmp_path, monkeypatch):
     assert r.profiles == ["Valentin (2 items)", "Kids (1 items)"]
     hist = stats.history(conn, profile="Valentin")
     assert [h["title"] for h in hist] == ["Dark", "The Irishman"]
-    assert hist[0]["watched_at"] == "2024-03-15T20:01:00Z"
+    assert [h["watched_on"] for h in hist] == ["2024-03-15", "2024-02-02"]
+    assert hist[0]["season_number"] == 1
+
+
+def test_sync_stops_at_disabled_more_button(tmp_path, monkeypatch):
+    # After the last batch Netflix keeps the button visible but disabled; sync must not hang on it.
+    session = tmp_path / "session.json"
+    session.write_text(json.dumps({"cookies": [], "origins": []}))
+    pages = [[("1.1.24", 1, "A Movie")], [("2.1.24", 2, "B Movie")], [("3.1.24", 3, "C Movie")]]
+
+    def handler(route):
+        if route.request.url.endswith("/account/profiles"):
+            return route.fulfill(body='<a href="/settings/viewed/AAAABBBBCCCCDDDD1111">Valentin</a>',
+                                 content_type="text/html")
+        return route.fulfill(body=activity_page(pages), content_type="text/html")
+
+    monkeypatch.setattr(sync, "_playwright", lambda: _wrapped(handler))
+    monkeypatch.setattr(sync, "MORE_ENABLE_WAIT_MS", 500)
+    r = sync.sync(db.connect(tmp_path / "d.db"), session)
+    assert r.profiles == ["Valentin (3 items)"]
+
+
+def test_sync_reports_unexpected_page(tmp_path, monkeypatch):
+    session = tmp_path / "session.json"
+    session.write_text(json.dumps({"cookies": [], "origins": []}))
+
+    def handler(route):
+        url = route.request.url
+        if url.endswith("/account/profiles"):
+            return route.fulfill(body=PROFILES_HTML, content_type="text/html")
+        return route.fulfill(body="<html><title>Sign In</title><body>Sign in</body></html>",
+                             content_type="text/html")
+
+    monkeypatch.setattr(sync, "_playwright", lambda: _wrapped(handler))
+    monkeypatch.setattr(sync, "FIRST_ROWS_TIMEOUT_MS", 1_000)
+    with pytest.raises(sync.SyncError, match="Sign In"):
+        sync.sync(db.connect(tmp_path / "x.db"), session)
+
+
+def test_parse_activity_dates():
+    assert sync.parse_activity_dates(["21.10.26", "11.1.26"]) == ["2026-10-21", "2026-01-11"]
+    assert sync.parse_activity_dates(["3/14/2026", "1/2/2026"]) == ["2026-03-14", "2026-01-02"]  # 14 => month first
+    assert sync.parse_activity_dates(["2026-03-14"]) == ["2026-03-14"]
+    assert sync.parse_activity_dates(["1/2/2026"], lang="en-US") == ["2026-01-02"]
+    assert sync.parse_activity_dates(["1/2/2026"], lang="ro") == ["2026-02-01"]
+    with pytest.raises(sync.SyncError):
+        sync.parse_activity_dates(["March 14"])
