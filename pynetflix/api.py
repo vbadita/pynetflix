@@ -4,11 +4,12 @@ from datetime import date
 from urllib.parse import urlencode
 
 from fastapi import FastAPI, HTTPException, Query
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, PlainTextResponse
 
 from . import __version__, db, stats
 from .availability import leaving_soon, removed_titles
 from .config import load_config
+from .exporters import history_csv_text
 from .report import render_wrapped
 
 
@@ -53,6 +54,13 @@ def create_app(db_path: str | None = None) -> FastAPI:
                     limit: int = Query(100, le=1000), offset: int = 0):
         return stats.history(conn, profile=profile, since=since, until=until, kind=kind,
                              search=q, limit=limit, offset=offset)
+
+    @app.get("/export.csv", response_class=PlainTextResponse)
+    def get_export_csv(profile: str | None = None, since: str | None = None, until: str | None = None,
+                       kind: str | None = Query(None, pattern="^(movie|series)$")):
+        rows = stats.history(conn, profile=profile, since=since, until=until, kind=kind, limit=10_000_000)
+        return PlainTextResponse(history_csv_text(rows), media_type="text/csv", headers={
+            "Content-Disposition": 'attachment; filename="pynetflix-history.csv"'})
 
     @app.get("/profiles/{profile}/history")
     def get_profile_history(profile: str, since: str | None = None, until: str | None = None,

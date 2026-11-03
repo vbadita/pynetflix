@@ -1,17 +1,12 @@
 """Command line: pynetflix <command>.  Run `pynetflix -h` for the list."""
 
 import argparse
-import csv
 import json
 import sys
 from pathlib import Path
 
 from . import __version__, db, stats
 from .config import load_config
-
-EXPORT_COLUMNS = ["profile", "watched_on", "watched_at", "title", "kind", "season_number",
-                  "episode_number", "episode_title", "duration_seconds", "device", "year",
-                  "netflix_status", "removed_from_netflix", "netflix_leaving_on"]
 
 
 def _tmdb(cfg):
@@ -65,8 +60,9 @@ def main(argv: list[str] | None = None) -> None:
     p.add_argument("--kind", choices=["movie", "series"]); p.add_argument("--search")
     p.add_argument("--limit", type=int, default=50)
 
-    p = sub.add_parser("export", help="write the full history to CSV (includes removed_from_netflix)")
+    p = sub.add_parser("export", help="write the full history to CSV or JSON (includes removed_from_netflix)")
     p.add_argument("out", type=Path)
+    p.add_argument("--format", choices=["csv", "json"], help="default: from the file extension, else csv")
     p.add_argument("--profile")
 
     p = sub.add_parser("ratings", help="your thumbs up/down ratings (from the data export)")
@@ -188,10 +184,13 @@ def main(argv: list[str] | None = None) -> None:
 
     elif args.cmd == "export":
         rows = stats.history(conn, profile=args.profile, limit=10_000_000)
+        fmt = args.format or ("json" if args.out.suffix.lower() == ".json" else "csv")
         with open(args.out, "w", newline="", encoding="utf-8") as f:
-            w = csv.DictWriter(f, fieldnames=EXPORT_COLUMNS, extrasaction="ignore")
-            w.writeheader()
-            w.writerows(rows)
+            if fmt == "json":
+                json.dump(rows, f, indent=2, ensure_ascii=False, default=str)
+            else:
+                from .exporters import history_to_csv
+                history_to_csv(rows, f)
         print(f"Wrote {len(rows)} rows to {args.out}")
 
     elif args.cmd == "wrapped":
