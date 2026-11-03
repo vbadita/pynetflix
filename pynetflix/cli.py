@@ -126,9 +126,12 @@ def main(argv: list[str] | None = None) -> None:
         login(cfg.session_path)
 
     elif args.cmd == "sync":
-        from .sync import sync
-        r = sync(conn, cfg.session_path, profiles=args.profile, check_leaving=args.check_leaving,
-                 headless=not args.show_browser)
+        from .sync import SyncError, sync
+        try:
+            r = sync(conn, cfg.session_path, profiles=args.profile, check_leaving=args.check_leaving,
+                     headless=not args.show_browser)
+        except SyncError as e:
+            sys.exit(f"Sync failed: {e}")
         print(f"{r.added} new, {r.merged} already known. Profiles: {', '.join(r.profiles)}")
         if args.check_leaving:
             print(f"{r.leaving_notices} 'last day to watch' notices found")

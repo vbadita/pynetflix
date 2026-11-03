@@ -27,7 +27,7 @@ _GUID_RE = re.compile(r"/(?:settings/[a-z]+|account/profiles?|profiles/manage)/(
 _PIN_SELECTOR = '[data-uia*="pin"], input[name="pin"], input[autocomplete="one-time-code"]'
 _PIN_TEXT_RE = re.compile(r"profile lock|enter your pin", re.I)
 PIN_WAIT_MINUTES = 5
-FIRST_RESPONSE_TIMEOUT_MS = 30_000
+FIRST_ROWS_TIMEOUT_MS = 30_000
 _LEAVING_RE = re.compile(r"Last day to watch(?: on Netflix)?:?\s*([A-Z][a-z]+ \d{1,2}(?:, \d{4})?)")
 
 
@@ -123,55 +123,105 @@ def _is_pin_prompt(page) -> bool:
     return bool(_PIN_TEXT_RE.search(page.content()))
 
 
-def _collect_viewing_activity(page, url: str, max_pages: int, pin_wait_ms: int | None = None) -> list[dict]:
-    """Open the viewing-activity page and gather every JSON payload with 'viewedItems'.
+_ROW_SELECTOR = 'li[data-uia="activity-row"], li.retableRow'
+_MORE_SELECTOR = "button.btn-blue.btn-small"
+_MORE_TEXT_RE = re.compile(r"show more|afișează mai multe|afiseaza mai multe|mehr|plus|más|più|mais", re.I)
+_DATE_RE = re.compile(r"^(\d{1,4})[./\-](\d{1,2})[./\-](\d{1,4})$")
+_ROWS_JS = """rows => rows.map(r => {
+    const a = r.querySelector('.title a');
+    const d = r.querySelector('.date');
+    return {date: d ? d.innerText.trim() : '', title: a ? a.innerText.trim() : '',
+            href: a ? (a.getAttribute('href') || '') : ''};
+})"""
 
-    Without `pin_wait_ms` a PIN prompt raises PinRequired. With it, we wait that long for
-    the user to type the PIN into the (visible) browser window.
+
+class SyncError(RuntimeError):
+    """Netflix's page didn't look the way sync expects."""
+
+
+def parse_activity_dates(texts: list[str], lang: str = "") -> list[str]:
+    """Turn the page's localised dates ('21.10.26', '3/14/2026', '2026-03-14') into ISO dates.
+
+    Netflix formats dates for the account's language. Day-first or month-first is worked out
+    from the whole list (any value above 12 settles it); `lang` is only the tiebreaker.
     """
-    items: list[dict] = []
+    parts = []
+    for t in texts:
+        m = _DATE_RE.match(t.strip())
+        if not m:
+            raise SyncError(f"Unrecognised date on the viewing-activity page: {t!r}")
+        parts.append(tuple(int(g) for g in m.groups()))
+    if all(len(str(a)) == 4 or a > 31 for a, _, _ in parts):  # year first
+        order = "ymd"
+    elif any(a > 12 for a, _, _ in parts):
+        order = "dmy"
+    elif any(b > 12 for _, b, _ in parts):
+        order = "mdy"
+    else:
+        order = "mdy" if lang.lower() in ("en", "en-us") else "dmy"
+    out = []
+    for a, b, c in parts:
+        y, mo, d = {"ymd": (a, b, c), "dmy": (c, b, a), "mdy": (c, a, b)}[order]
+        y = y + 2000 if y < 100 else y
+        out.append(f"{y:04d}-{mo:02d}-{d:02d}")
+    return out
 
-    def viewed_items(response) -> list | None:
-        if "json" not in (response.headers.get("content-type") or ""):
-            return None
-        try:
-            body = response.json()
-        except Exception:
-            return None
-        if isinstance(body, dict) and isinstance(body.get("viewedItems"), list):
-            return body["viewedItems"]
-        return None
 
-    def is_activity(response) -> bool:
-        return viewed_items(response) is not None
+def _read_rows(page) -> list[dict]:
+    return page.eval_on_selector_all(_ROW_SELECTOR, _ROWS_JS)
 
+
+def _more_button(page):
+    for loc in (page.locator(_MORE_SELECTOR), page.get_by_role("button", name=_MORE_TEXT_RE)):
+        if loc.count() and loc.first.is_visible():
+            return loc.first
+    return None
+
+
+def _collect_viewing_activity(page, url: str, max_pages: int, pin_wait_ms: int | None = None) -> list[dict]:
+    """Open the viewing-activity page, click "show more" until done, and read the rows.
+
+    Netflix renders the history into the page (`li[data-uia=activity-row]`), so we read the
+    HTML instead of intercepting JSON. Without `pin_wait_ms` a PIN prompt raises PinRequired.
+    With it, we wait that long for the user to type the PIN into the (visible) browser window.
+    """
     try:
-        with page.expect_response(is_activity, timeout=FIRST_RESPONSE_TIMEOUT_MS) as first:
-            page.goto(url)
-    except Exception:
+        page.goto(url)
+        page.wait_for_selector(_ROW_SELECTOR, timeout=FIRST_ROWS_TIMEOUT_MS)
+    except Exception as e:
         if not _is_pin_prompt(page):
-            raise
+            raise SyncError(
+                f"No viewing activity found at {page.url} (page title: {page.title()!r}). "
+                "The profile may have no history yet, the saved session may have expired "
+                "(run: pynetflix login), or Netflix changed its page.") from e
         if pin_wait_ms is None:
             raise PinRequired(url) from None
         print("This profile is PIN-locked: type the PIN in the browser window...")
-        with page.expect_response(is_activity, timeout=pin_wait_ms) as first:
-            pass
-    items.extend(viewed_items(first.value))
+        page.wait_for_selector(_ROW_SELECTOR, timeout=pin_wait_ms)
+
     for _ in range(max_pages):
-        more = page.get_by_role("button", name=re.compile(r"show more", re.I))
-        if not more.count() or not more.first.is_visible():
+        more = _more_button(page)
+        if more is None:
             break
-        # Wait for the specific payload the click triggers, so a slow page is never
-        # dropped or attributed to the next profile.
-        try:
-            with page.expect_response(is_activity, timeout=30_000) as nxt:
-                more.first.click()
+        before = len(_read_rows(page))
+        more.click()
+        try:  # wait for the new rows, so a slow page is never cut short or mixed with the next profile
+            page.wait_for_function(
+                "([sel, n]) => document.querySelectorAll(sel).length > n",
+                arg=[_ROW_SELECTOR, before], timeout=30_000)
         except Exception:
             break
-        batch = viewed_items(nxt.value)
-        if not batch:
-            break
-        items.extend(batch)
+
+    rows = [r for r in _read_rows(page) if r["title"] and r["date"]]
+    lang = page.evaluate("document.documentElement.lang") or ""
+    dates = parse_activity_dates([r["date"] for r in rows], lang)
+    items = []
+    for r, day in zip(rows, dates, strict=True):
+        item = {"title": r["title"], "dateStr": day}
+        m = re.search(r"/title/(\d+)", r["href"])
+        if m:  # an episode id for series, the title id for movies (only used for movies)
+            item["movieID"] = int(m.group(1))
+        items.append(item)
     return items
 
 
