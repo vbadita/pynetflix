@@ -3,7 +3,12 @@ from datetime import date
 from conftest import FIXTURES, FakeTMDB
 
 from pynetflix import stats
-from pynetflix.availability import check_availability, record_leaving_notice, removed_titles
+from pynetflix.availability import (
+    check_availability,
+    record_availability,
+    record_leaving_notice,
+    removed_titles,
+)
 from pynetflix.enrich import enrich_titles
 from pynetflix.importers import import_data_export, import_viewing_activity_csv
 
@@ -138,3 +143,23 @@ def test_resolve_country(conn):
     import_data_export(conn, FIXTURES / "netflix-report.zip")
     assert resolve_country(conn, None) == "RO"  # taken from the export's viewings
     assert resolve_country(conn, "de") == "DE"  # explicit setting wins
+
+
+def test_my_list_import_flags_removed(conn, tmp_path):
+    from pynetflix.importers import import_my_list
+    csv_path = tmp_path / "MyList.csv"
+    csv_path.write_text(
+        "Profile Name,Title Name,Country,Utc Title Add Date\n"
+        "Valentin,Dark,RO,2024-01-05 10:00:00\n"
+        "Valentin,Our Planet,RO,2024-02-06 11:00:00\n"
+        ",Nobody,RO,2024-02-06 11:00:00\n", encoding="utf-8")
+    assert import_my_list(conn, csv_path) == 2
+    assert import_my_list(conn, csv_path) == 2  # idempotent
+    assert len(stats.my_list(conn)) == 2
+    dark = conn.execute("SELECT id FROM titles WHERE name = 'Dark'").fetchone()["id"]
+    record_availability(conn, dark, "RO", False)
+    removed = stats.my_list(conn, removed_only=True)
+    assert [(r["title"], r["netflix_status"]) for r in removed] == [("Dark", "removed")]
+    assert stats.my_list(conn)[0]["title"] == "Dark"  # removed first
+    assert stats.my_list(conn, profile="Kids") == []
+    assert import_my_list(conn, tmp_path / "nothing.csv") == 0

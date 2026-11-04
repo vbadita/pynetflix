@@ -69,6 +69,10 @@ def main(argv: list[str] | None = None) -> None:
     p.add_argument("--profile")
     p.add_argument("--rating", type=int, choices=[-1, 1, 2], help="-1 down, 1 up, 2 love this")
 
+    p = sub.add_parser("my-list", help="your Netflix My List (from the data export), flagging titles that left")
+    p.add_argument("--profile")
+    p.add_argument("--removed", action="store_true", help="only titles no longer on Netflix")
+
     p = sub.add_parser("wrapped", help="yearly/monthly recap")
     p.add_argument("--profile"); p.add_argument("--year", type=int); p.add_argument("--month", type=int)
     p.add_argument("--html", type=Path, help="write a shareable HTML page here")
@@ -115,6 +119,9 @@ def main(argv: list[str] | None = None) -> None:
             rated = importers.import_ratings(conn, args.file)
             if rated:
                 print(f"{rated} ratings imported")
+            listed = importers.import_my_list(conn, args.file)
+            if listed:
+                print(f"{listed} My List entries imported")
         else:
             if not args.profile:
                 sys.exit("Viewing Activity CSVs don't include the profile name: pass --profile NAME")
@@ -207,6 +214,9 @@ def main(argv: list[str] | None = None) -> None:
 
     elif args.cmd == "ratings":
         _print(stats.ratings(conn, profile=args.profile, rating=args.rating))
+
+    elif args.cmd == "my-list":
+        _print(stats.my_list(conn, profile=args.profile, removed_only=args.removed))
 
     elif args.cmd == "abandoned":
         _print(stats.abandoned(conn, profile=args.profile, idle_days=args.idle_days))

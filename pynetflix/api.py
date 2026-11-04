@@ -71,6 +71,10 @@ def create_app(db_path: str | None = None) -> FastAPI:
     def get_ratings(profile: str | None = None, rating: int | None = Query(None, ge=-1, le=2)):
         return stats.ratings(conn, profile=profile, rating=rating)
 
+    @app.get("/my-list")
+    def get_my_list(profile: str | None = None, removed: bool = False):
+        return stats.my_list(conn, profile=profile, removed_only=removed)
+
     @app.get("/titles")
     def get_titles(status: str | None = Query(None, pattern="^(available|removed|unknown)$"),
                    kind: str | None = Query(None, pattern="^(movie|series)$"),
