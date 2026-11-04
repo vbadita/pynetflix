@@ -109,6 +109,31 @@ def import_ratings(conn: sqlite3.Connection, path: Path | str) -> int:
     return stored
 
 
+def import_my_list(conn: sqlite3.Connection, path: Path | str) -> int:
+    """Import "My List" from the export's MyList.csv. Returns how many entries were stored."""
+    f = _open_export_csv(Path(path), "MyList.csv")
+    if f is None:
+        return 0
+    stored = 0
+    with f, conn:
+        for r in csv.DictReader(f):
+            name = (r.get("Title Name") or "").strip()
+            profile = (r.get("Profile Name") or "").strip()
+            if not name or not profile:
+                continue
+            parsed = parse_title(name)
+            title_id = db.get_or_create_title(conn, parsed)
+            profile_id = db.get_or_create_profile(conn, profile)
+            added_at = (r.get("Utc Title Add Date") or "").strip() or None
+            conn.execute(
+                "INSERT INTO my_list (profile_id, title_id, added_at) VALUES (?, ?, ?) "
+                "ON CONFLICT (profile_id, title_id) DO UPDATE SET added_at = excluded.added_at",
+                (profile_id, title_id, added_at),
+            )
+            stored += 1
+    return stored
+
+
 def import_data_export(conn: sqlite3.Connection, path: Path | str,
                        min_seconds: int = 60) -> ImportResult:
     """Import the personal-data export (ZIP or its ViewingActivity.csv)."""

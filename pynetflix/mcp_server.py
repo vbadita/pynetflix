@@ -39,6 +39,11 @@ def build_server(db_path: str | None = None):
         return stats.ratings(conn, profile=profile, rating=rating)
 
     @server.tool()
+    def my_list(profile: str | None = None, removed_only: bool = False) -> list[dict]:
+        """Titles on the Netflix My List, with netflix_status; removed_only keeps those that left Netflix."""
+        return stats.my_list(conn, profile=profile, removed_only=removed_only)
+
+    @server.tool()
     def wrapped(profile: str | None = None, year: int | None = None, month: int | None = None) -> dict:
         """Yearly or monthly recap: hours, top titles and genres, streaks, binges."""
         return stats.wrapped(conn, profile=profile, year=year, month=month)

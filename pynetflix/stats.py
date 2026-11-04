@@ -77,6 +77,22 @@ def ratings(conn: sqlite3.Connection, profile: str | None = None, rating: int | 
     return [dict(r) for r in conn.execute(sql, params)]
 
 
+def my_list(conn: sqlite3.Connection, profile: str | None = None, removed_only: bool = False) -> list[dict]:
+    """Titles on your Netflix "My List", flagged with whether they are still on Netflix."""
+    where, params = [], []
+    if profile:
+        where.append("p.name = ?"); params.append(profile)
+    if removed_only:
+        where.append("t.netflix_status = 'removed'")
+    sql = f"""SELECT p.name AS profile, t.id AS title_id, t.name AS title, t.kind, m.added_at,
+                     t.netflix_status, t.removed_from_netflix, t.netflix_leaving_on
+              FROM my_list m JOIN profiles p ON p.id = m.profile_id
+              JOIN titles_view t ON t.id = m.title_id
+              {"WHERE " + " AND ".join(where) if where else ""}
+              ORDER BY t.netflix_status = 'removed' DESC, m.added_at DESC"""
+    return [dict(r) for r in conn.execute(sql, params)]
+
+
 def title(conn: sqlite3.Connection, title_id: int) -> dict | None:
     row = conn.execute("SELECT * FROM titles_view WHERE id = ?", (title_id,)).fetchone()
     if not row:

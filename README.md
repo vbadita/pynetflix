@@ -97,6 +97,7 @@ your imported data-export viewings (falling back to `US` when there are none).
 | `removed` / `leaving` | Titles that left Netflix / have an announced last day |
 | `history` / `export` | Query or dump your history (`export` writes CSV or JSON; the API serves CSV at `/export.csv`) |
 | `ratings` | Your thumbs down / up / "love this" ratings, imported from the data export |
+| `my-list` | Your Netflix "My List" (imported from the data export's `MyList.csv`), flagging titles that left Netflix (`--removed` for only those); API: `/my-list` |
 | `wrapped` | Spotify-Wrapped-style recap per year or month, with a shareable HTML page |
 | `abandoned` | Shows you stopped watching, flagging those with a new season out |
 | `shared` | Overlap between profiles and "watch together" suggestions |

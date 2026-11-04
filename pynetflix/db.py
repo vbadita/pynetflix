@@ -74,6 +74,14 @@ CREATE TABLE IF NOT EXISTS ratings (
     PRIMARY KEY (profile_id, title_id)
 );
 
+-- Netflix "My List" (MyList.csv in the data export).
+CREATE TABLE IF NOT EXISTS my_list (
+    profile_id  INTEGER NOT NULL REFERENCES profiles(id),
+    title_id    INTEGER NOT NULL REFERENCES titles(id),
+    added_at    TEXT,
+    PRIMARY KEY (profile_id, title_id)
+);
+
 -- Titles first guessed wrong ("Show: Episode" parsed as a movie) and later corrected.
 CREATE TABLE IF NOT EXISTS title_aliases (
     normalized_name TEXT PRIMARY KEY,
@@ -165,6 +173,8 @@ def merge_movie_into_series(conn: sqlite3.Connection, title_id: int) -> int | No
                          (series_id, episode, key, v["id"]))
     conn.execute("DELETE FROM availability_log WHERE title_id = ?", (title_id,))
     conn.execute("UPDATE OR IGNORE ratings SET title_id = ? WHERE title_id = ?", (series_id, title_id))
+    conn.execute("UPDATE OR IGNORE my_list SET title_id = ? WHERE title_id = ?", (series_id, title_id))
+    conn.execute("DELETE FROM my_list WHERE title_id = ?", (title_id,))
     conn.execute("DELETE FROM ratings WHERE title_id = ?", (title_id,))
     conn.execute("UPDATE title_aliases SET title_id = ? WHERE title_id = ?", (series_id, title_id))
     conn.execute("DELETE FROM titles WHERE id = ?", (title_id,))
