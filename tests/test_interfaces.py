@@ -100,3 +100,19 @@ def test_sync_item_mapping():
         ("Dark", "series", 1, "Secrets", 80100172)
     parsed, nid = item_to_parsed({"title": "The Irishman", "movieID": 80175798})
     assert (parsed.kind, nid) == ("movie", 80175798)
+
+
+def test_search_names_cast_and_genres(tmp_path):
+    path, conn = _seeded(tmp_path)
+    conn.execute("UPDATE titles SET cast_members = ? WHERE normalized_name = 'dark'",
+                 (json.dumps(["Louis Hofmann", "Lisa Vicari"]),))
+    conn.commit()
+    from pynetflix import stats
+    assert [t["name"] for t in stats.search(conn, "irish")] == ["The Irishman"]
+    assert [t["name"] for t in stats.search(conn, "hofmann")] == ["Dark"]
+    assert "Dark" in [t["name"] for t in stats.search(conn, "MYSTERY")]
+    assert [t["name"] for t in stats.search(conn, "drama mystery")] == ["Dark"]
+    assert stats.search(conn, "100%") == [] and stats.search(conn, "  ") == []
+    client = TestClient(create_app(str(path)))
+    assert [t["name"] for t in client.get("/search", params={"q": "lisa vicari"}).json()] == ["Dark"]
+    assert client.get("/search").status_code == 422

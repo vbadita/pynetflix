@@ -34,6 +34,11 @@ def build_server(db_path: str | None = None):
                              search=search, limit=min(limit, 500))
 
     @server.tool()
+    def search_titles(query: str, limit: int = 50) -> list[dict]:
+        """Find titles by name, cast member or genre; every word in the query must match."""
+        return stats.search(conn, query, limit=min(limit, 500))
+
+    @server.tool()
     def ratings(profile: str | None = None, rating: int | None = None) -> list[dict]:
         """Thumbs ratings: -1 thumbs down, 1 thumbs up, 2 love this. Filter by profile or rating."""
         return stats.ratings(conn, profile=profile, rating=rating)

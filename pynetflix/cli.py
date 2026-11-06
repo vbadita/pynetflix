@@ -60,6 +60,9 @@ def main(argv: list[str] | None = None) -> None:
     p.add_argument("--kind", choices=["movie", "series"]); p.add_argument("--search")
     p.add_argument("--limit", type=int, default=50)
 
+    p = sub.add_parser("search", help="find titles by name, cast or genre")
+    p.add_argument("query", nargs="+"); p.add_argument("--limit", type=int, default=50)
+
     p = sub.add_parser("export", help="write the full history to CSV or JSON (includes removed_from_netflix)")
     p.add_argument("out", type=Path)
     p.add_argument("--format", choices=["csv", "json"], help="default: from the file extension, else csv")
@@ -191,6 +194,9 @@ def main(argv: list[str] | None = None) -> None:
     elif args.cmd == "history":
         _print(stats.history(conn, profile=args.profile, since=args.since, until=args.until,
                              kind=args.kind, search=args.search, limit=args.limit))
+
+    elif args.cmd == "search":
+        _print(stats.search(conn, " ".join(args.query), limit=args.limit))
 
     elif args.cmd == "export":
         rows = stats.history(conn, profile=args.profile, limit=10_000_000)
