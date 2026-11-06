@@ -116,6 +116,22 @@ def titles(conn: sqlite3.Connection, status: str | None = None, kind: str | None
     return [db.row_to_dict(r) for r in conn.execute(sql, params + [limit, offset])]
 
 
+def search(conn: sqlite3.Connection, query: str, limit: int = 50) -> list[dict]:
+    """Titles whose name, cast or genres contain every word of the query (case-insensitive)."""
+    words = query.split()
+    if not words:
+        return []
+    where, params = [], []
+    for w in words:
+        like = "%" + w.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%"
+        where.append("(name LIKE ? ESCAPE '\\' OR cast_members LIKE ? ESCAPE '\\' "
+                     "OR genres LIKE ? ESCAPE '\\')")
+        params += [like] * 3
+    sql = (f"SELECT * FROM titles_view WHERE {' AND '.join(where)} "
+           "ORDER BY last_watched_on DESC LIMIT ?")
+    return [db.row_to_dict(r) for r in conn.execute(sql, params + [limit])]
+
+
 def _estimated_seconds(row: sqlite3.Row) -> int:
     """Real duration when we have it, otherwise the TMDB runtime, otherwise a guess."""
     if row["duration_seconds"]:

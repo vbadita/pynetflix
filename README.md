@@ -95,6 +95,7 @@ your imported data-export viewings (falling back to `US` when there are none).
 | `check-availability` | Re-check which watched titles are still on Netflix |
 | `watch` | Daily routine: sync (if logged in) + check availability, then report what newly left / is leaving soon |
 | `removed` / `leaving` | Titles that left Netflix / have an announced last day |
+| `search` | Find titles by name, cast member or genre (`pynetflix search crime scorsese`); API: `/search?q=`; MCP: `search_titles` |
 | `history` / `export` | Query or dump your history (`export` writes CSV or JSON; the API serves CSV at `/export.csv`) |
 | `ratings` | Your thumbs down / up / "love this" ratings, imported from the data export |
 | `my-list` | Your Netflix "My List" (imported from the data export's `MyList.csv`), flagging titles that left Netflix (`--removed` for only those); API: `/my-list` |

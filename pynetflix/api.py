@@ -81,6 +81,10 @@ def create_app(db_path: str | None = None) -> FastAPI:
                    limit: int = Query(200, le=2000), offset: int = 0):
         return stats.titles(conn, status=status, kind=kind, limit=limit, offset=offset)
 
+    @app.get("/search")
+    def get_search(q: str = Query(..., min_length=1), limit: int = Query(50, le=500)):
+        return stats.search(conn, q, limit=limit)
+
     @app.get("/titles/removed")
     def get_removed(profile: str | None = None):
         return removed_titles(conn, profile)
