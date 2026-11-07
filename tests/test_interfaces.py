@@ -116,3 +116,23 @@ def test_search_names_cast_and_genres(tmp_path):
     client = TestClient(create_app(str(path)))
     assert [t["name"] for t in client.get("/search", params={"q": "lisa vicari"}).json()] == ["Dark"]
     assert client.get("/search").status_code == 422
+
+
+def test_api_total_count_header(tmp_path):
+    path, conn = _seeded(tmp_path)
+    client = TestClient(create_app(str(path)))
+    everything = client.get("/history", params={"limit": 1000}).json()
+    page = client.get("/history", params={"limit": 1, "offset": 1})
+    assert len(page.json()) == 1
+    assert int(page.headers["x-total-count"]) == len(everything) > 1
+    mine = client.get("/profiles/Valentin/history", params={"limit": 1})
+    assert int(mine.headers["x-total-count"]) == len(
+        client.get("/history", params={"profile": "Valentin", "limit": 1000}).json())
+    filtered = client.get("/history", params={"kind": "movie", "limit": 1})
+    assert int(filtered.headers["x-total-count"]) == len(
+        client.get("/history", params={"kind": "movie", "limit": 1000}).json())
+    all_titles = client.get("/titles", params={"limit": 2000}).json()
+    titles = client.get("/titles", params={"limit": 1})
+    assert int(titles.headers["x-total-count"]) == len(all_titles)
+    removed = client.get("/titles", params={"status": "removed", "limit": 1})
+    assert int(removed.headers["x-total-count"]) == 1

@@ -3,7 +3,7 @@
 from datetime import date
 from urllib.parse import urlencode
 
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import FastAPI, HTTPException, Query, Response
 from fastapi.responses import HTMLResponse, PlainTextResponse
 
 from . import __version__, db, stats
@@ -49,9 +49,11 @@ def create_app(db_path: str | None = None) -> FastAPI:
         return stats.profiles(conn)
 
     @app.get("/history")
-    def get_history(profile: str | None = None, since: str | None = None, until: str | None = None,
-                    kind: str | None = Query(None, pattern="^(movie|series)$"), q: str | None = None,
-                    limit: int = Query(100, le=1000), offset: int = 0):
+    def get_history(response: Response, profile: str | None = None, since: str | None = None,
+                    until: str | None = None, kind: str | None = Query(None, pattern="^(movie|series)$"),
+                    q: str | None = None, limit: int = Query(100, le=1000), offset: int = 0):
+        response.headers["X-Total-Count"] = str(stats.history_count(
+            conn, profile=profile, since=since, until=until, kind=kind, search=q))
         return stats.history(conn, profile=profile, since=since, until=until, kind=kind,
                              search=q, limit=limit, offset=offset)
 
@@ -63,8 +65,10 @@ def create_app(db_path: str | None = None) -> FastAPI:
             "Content-Disposition": 'attachment; filename="pynetflix-history.csv"'})
 
     @app.get("/profiles/{profile}/history")
-    def get_profile_history(profile: str, since: str | None = None, until: str | None = None,
-                            limit: int = Query(100, le=1000), offset: int = 0):
+    def get_profile_history(response: Response, profile: str, since: str | None = None,
+                            until: str | None = None, limit: int = Query(100, le=1000), offset: int = 0):
+        response.headers["X-Total-Count"] = str(stats.history_count(
+            conn, profile=profile, since=since, until=until))
         return stats.history(conn, profile=profile, since=since, until=until, limit=limit, offset=offset)
 
     @app.get("/ratings")
@@ -76,9 +80,11 @@ def create_app(db_path: str | None = None) -> FastAPI:
         return stats.my_list(conn, profile=profile, removed_only=removed)
 
     @app.get("/titles")
-    def get_titles(status: str | None = Query(None, pattern="^(available|removed|unknown)$"),
+    def get_titles(response: Response,
+                   status: str | None = Query(None, pattern="^(available|removed|unknown)$"),
                    kind: str | None = Query(None, pattern="^(movie|series)$"),
                    limit: int = Query(200, le=2000), offset: int = 0):
+        response.headers["X-Total-Count"] = str(stats.titles_count(conn, status=status, kind=kind))
         return stats.titles(conn, status=status, kind=kind, limit=limit, offset=offset)
 
     @app.get("/search")
