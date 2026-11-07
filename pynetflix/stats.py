@@ -35,9 +35,7 @@ def status(conn: sqlite3.Connection) -> dict:
     }
 
 
-def history(conn: sqlite3.Connection, profile: str | None = None, since: str | None = None,
-            until: str | None = None, kind: str | None = None, search: str | None = None,
-            limit: int = 100, offset: int = 0) -> list[dict]:
+def _history_filter(profile, since, until, kind, search) -> tuple[str, list]:
     where, params = [], []
     if profile:
         where.append("p.name = ?"); params.append(profile)
@@ -49,6 +47,22 @@ def history(conn: sqlite3.Connection, profile: str | None = None, since: str | N
         where.append("t.kind = ?"); params.append(kind)
     if search:
         where.append("(t.name LIKE ? OR v.episode_title LIKE ?)"); params += [f"%{search}%"] * 2
+    return ("WHERE " + " AND ".join(where) if where else ""), params
+
+
+def history_count(conn: sqlite3.Connection, profile: str | None = None, since: str | None = None,
+                  until: str | None = None, kind: str | None = None, search: str | None = None) -> int:
+    """Total number of viewings matching the same filters as history(), ignoring limit/offset."""
+    where, params = _history_filter(profile, since, until, kind, search)
+    return conn.execute(
+        "SELECT COUNT(*) FROM viewings v JOIN profiles p ON p.id = v.profile_id "
+        f"JOIN titles t ON t.id = v.title_id {where}", params).fetchone()[0]
+
+
+def history(conn: sqlite3.Connection, profile: str | None = None, since: str | None = None,
+            until: str | None = None, kind: str | None = None, search: str | None = None,
+            limit: int = 100, offset: int = 0) -> list[dict]:
+    where, params = _history_filter(profile, since, until, kind, search)
     sql = f"""
         SELECT v.id, p.name AS profile, v.watched_on, v.watched_at, v.duration_seconds,
                t.id AS title_id, t.name AS title, t.kind, v.season_number, v.season_label,
@@ -57,7 +71,7 @@ def history(conn: sqlite3.Connection, profile: str | None = None, since: str | N
                    AS removed_from_netflix, t.netflix_leaving_on, r.rating
         FROM viewings v JOIN profiles p ON p.id = v.profile_id JOIN titles t ON t.id = v.title_id
         LEFT JOIN ratings r ON r.profile_id = v.profile_id AND r.title_id = v.title_id
-        {"WHERE " + " AND ".join(where) if where else ""}
+        {where}
         ORDER BY v.watched_on DESC, v.watched_at DESC, v.id DESC
         LIMIT ? OFFSET ?"""
     return [db.row_to_dict(r) for r in conn.execute(sql, params + [limit, offset])]
@@ -104,14 +118,25 @@ def title(conn: sqlite3.Connection, title_id: int) -> dict | None:
     return d
 
 
-def titles(conn: sqlite3.Connection, status: str | None = None, kind: str | None = None,
-           limit: int = 200, offset: int = 0) -> list[dict]:
+def _titles_filter(status, kind) -> tuple[str, list]:
     where, params = [], []
     if status:
         where.append("netflix_status = ?"); params.append(status)
     if kind:
         where.append("kind = ?"); params.append(kind)
-    sql = (f"SELECT * FROM titles_view {'WHERE ' + ' AND '.join(where) if where else ''} "
+    return ("WHERE " + " AND ".join(where) if where else ""), params
+
+
+def titles_count(conn: sqlite3.Connection, status: str | None = None, kind: str | None = None) -> int:
+    """Total number of titles matching the same filters as titles(), ignoring limit/offset."""
+    where, params = _titles_filter(status, kind)
+    return conn.execute(f"SELECT COUNT(*) FROM titles_view {where}", params).fetchone()[0]
+
+
+def titles(conn: sqlite3.Connection, status: str | None = None, kind: str | None = None,
+           limit: int = 200, offset: int = 0) -> list[dict]:
+    where, params = _titles_filter(status, kind)
+    sql = (f"SELECT * FROM titles_view {where} "
            "ORDER BY last_watched_on DESC LIMIT ? OFFSET ?")
     return [db.row_to_dict(r) for r in conn.execute(sql, params + [limit, offset])]
 
