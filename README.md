@@ -1,5 +1,10 @@
 # pynetflix
 
+[![CI](https://github.com/vbadita/pynetflix/actions/workflows/ci.yml/badge.svg)](https://github.com/vbadita/pynetflix/actions/workflows/ci.yml)
+[![PyPI](https://img.shields.io/pypi/v/pynetflix.svg)](https://pypi.org/project/pynetflix/)
+[![Python](https://img.shields.io/pypi/pyversions/pynetflix.svg)](https://pypi.org/project/pynetflix/)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](pyproject.toml)
+
 **Your own Netflix account as a local API.** Netflix has no public API for your viewing history.
 pynetflix pulls it into a local SQLite database for every profile. It adds genres, cast and
 runtimes, tracks **when titles you watched were removed from Netflix**, and serves it all as a
