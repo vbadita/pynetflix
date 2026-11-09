@@ -150,7 +150,14 @@ def import_data_export(conn: sqlite3.Connection, path: Path | str,
                 result.skipped += 1  # trailers, hooks, teasers
                 continue
             seconds = parse_duration(r.get("Duration")) or 0
-            started = datetime.strptime(r["Start Time"].strip(), "%Y-%m-%d %H:%M:%S")
+            try:
+                started = datetime.strptime((r.get("Start Time") or "").strip(), "%Y-%m-%d %H:%M:%S")
+            except ValueError:
+                result.skipped += 1  # blank or malformed timestamp: don't abort the whole import
+                continue
+            if not (r.get("Profile Name") and r.get("Title")):
+                result.skipped += 1
+                continue
             key = (r["Profile Name"], r["Title"], started.date().isoformat())
             g = grouped.get(key)
             if g is None:
