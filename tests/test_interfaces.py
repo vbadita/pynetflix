@@ -136,3 +136,16 @@ def test_api_total_count_header(tmp_path):
     assert int(titles.headers["x-total-count"]) == len(all_titles)
     removed = client.get("/titles", params={"status": "removed", "limit": 1})
     assert int(removed.headers["x-total-count"]) == 1
+
+
+def test_api_rejects_unbounded_paging_and_escapes_like(tmp_path):
+    path, _ = _seeded(tmp_path)
+    client = TestClient(create_app(str(path)))
+    # SQLite treats LIMIT -1 as "no limit", which would bypass the page-size cap.
+    for url in ("/history?limit=-1", "/history?limit=0", "/history?offset=-1",
+                "/titles?limit=-1", "/search?q=dark&limit=-1", "/profiles/Valentin/history?limit=-1"):
+        assert client.get(url).status_code == 422, url
+    # % and _ in a history search are literal characters, not wildcards.
+    assert client.get("/history", params={"q": "%"}).json() == []
+    assert client.get("/history", params={"q": "D_rk"}).json() == []
+    assert client.get("/history", params={"q": "dark"}).json()
