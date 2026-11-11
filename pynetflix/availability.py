@@ -116,10 +116,12 @@ def removed_titles(conn: sqlite3.Connection, profile: str | None = None) -> list
     return [db.row_to_dict(r) for r in conn.execute(query, params)]
 
 
-def leaving_soon(conn: sqlite3.Connection) -> list[dict]:
+def leaving_soon(conn: sqlite3.Connection, today: str | None = None) -> list[dict]:
+    """Titles with an announced last day that is today or later (in local time, like every
+    other date we store; SQLite's date('now') is UTC and would drop a title on its last evening)."""
     return [db.row_to_dict(r) for r in conn.execute(
-        "SELECT * FROM titles_view WHERE netflix_leaving_on >= date('now') "
-        "AND netflix_status != 'removed' ORDER BY netflix_leaving_on")]
+        "SELECT * FROM titles_view WHERE netflix_leaving_on >= ? "
+        "AND netflix_status != 'removed' ORDER BY netflix_leaving_on", (today or db.today(),))]
 
 
 def watch(conn: sqlite3.Connection, tmdb: TMDB, country: str) -> dict:
