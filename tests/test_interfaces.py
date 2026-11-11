@@ -118,6 +118,18 @@ def test_search_names_cast_and_genres(tmp_path):
     assert client.get("/search").status_code == 422
 
 
+def test_history_search_treats_wildcards_literally(tmp_path):
+    path, conn = _seeded(tmp_path)
+    from pynetflix import stats
+    assert stats.history(conn, search="Irishman")
+    # % and _ are LIKE wildcards; a search for them must not match every viewing.
+    for q in ("%", "_", "Dar_", "%Irish"):
+        assert stats.history(conn, search=q) == [] and stats.history_count(conn, search=q) == 0
+    client = TestClient(create_app(str(path)))
+    r = client.get("/history", params={"q": "_"})
+    assert r.json() == [] and r.headers["X-Total-Count"] == "0"
+
+
 def test_api_total_count_header(tmp_path):
     path, conn = _seeded(tmp_path)
     client = TestClient(create_app(str(path)))

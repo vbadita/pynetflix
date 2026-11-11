@@ -35,6 +35,11 @@ def status(conn: sqlite3.Connection) -> dict:
     }
 
 
+def _like(text: str) -> str:
+    """LIKE pattern matching text anywhere, with % and _ taken literally (use ESCAPE '\\')."""
+    return "%" + text.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%"
+
+
 def _history_filter(profile, since, until, kind, search) -> tuple[str, list]:
     where, params = [], []
     if profile:
@@ -46,7 +51,8 @@ def _history_filter(profile, since, until, kind, search) -> tuple[str, list]:
     if kind:
         where.append("t.kind = ?"); params.append(kind)
     if search:
-        where.append("(t.name LIKE ? OR v.episode_title LIKE ?)"); params += [f"%{search}%"] * 2
+        where.append("(t.name LIKE ? ESCAPE '\\' OR v.episode_title LIKE ? ESCAPE '\\')")
+        params += [_like(search)] * 2
     return ("WHERE " + " AND ".join(where) if where else ""), params
 
 
@@ -148,7 +154,7 @@ def search(conn: sqlite3.Connection, query: str, limit: int = 50) -> list[dict]:
         return []
     where, params = [], []
     for w in words:
-        like = "%" + w.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%"
+        like = _like(w)
         where.append("(name LIKE ? ESCAPE '\\' OR cast_members LIKE ? ESCAPE '\\' "
                      "OR genres LIKE ? ESCAPE '\\')")
         params += [like] * 3
