@@ -163,3 +163,17 @@ def test_my_list_import_flags_removed(conn, tmp_path):
     assert stats.my_list(conn)[0]["title"] == "Dark"  # removed first
     assert stats.my_list(conn, profile="Kids") == []
     assert import_my_list(conn, tmp_path / "nothing.csv") == 0
+
+
+def test_leaving_soon_uses_local_date(conn, monkeypatch):
+    from pynetflix import db
+    from pynetflix.availability import leaving_soon
+
+    import_viewing_activity_csv(conn, FIXTURES / "NetflixViewingHistory.csv", "Valentin")
+    title_id = conn.execute("SELECT id FROM titles WHERE normalized_name = 'dark'").fetchone()[0]
+    record_leaving_notice(conn, title_id, "2024-06-30")
+    # The last day counts as "leaving soon" until it is over in local time, whatever UTC says.
+    monkeypatch.setattr(db, "today", lambda: "2024-06-30")
+    assert [t["name"] for t in leaving_soon(conn)] == ["Dark"]
+    assert [t["name"] for t in leaving_soon(conn, today="2024-06-29")] == ["Dark"]
+    assert leaving_soon(conn, today="2024-07-01") == []
