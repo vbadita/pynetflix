@@ -160,6 +160,9 @@ def main(argv: list[str] | None = None) -> None:
         r = check_availability(conn, _tmdb(cfg), country)
         print(f"Checked {r.checked} titles in {country}: {r.still_available} on Netflix, "
               f"{r.newly_removed} newly removed, {r.back_on_netflix} back on Netflix")
+        if r.failed:
+            print(f"{r.failed} titles could not be checked (TMDB errors); they'll be retried next run",
+                  file=sys.stderr)
 
     elif args.cmd == "watch":
         from .availability import resolve_country, watch
@@ -173,6 +176,9 @@ def main(argv: list[str] | None = None) -> None:
         country = resolve_country(conn, cfg.country)
         report = watch(conn, _tmdb(cfg), country)
         print(f"Checked {report['checked']} titles in {country}.")
+        if report["failed"]:
+            print(f"{report['failed']} titles could not be checked (TMDB errors); they'll be retried next run",
+                  file=sys.stderr)
         for heading, key, date_key in [("Newly left Netflix", "newly_left", "removed_from_netflix"),
                                        ("Back on Netflix", "back_on_netflix", None),
                                        ("Leaving soon", "leaving_soon", "netflix_leaving_on")]:
