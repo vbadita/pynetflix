@@ -163,3 +163,34 @@ def test_my_list_import_flags_removed(conn, tmp_path):
     assert stats.my_list(conn)[0]["title"] == "Dark"  # removed first
     assert stats.my_list(conn, profile="Kids") == []
     assert import_my_list(conn, tmp_path / "nothing.csv") == 0
+
+
+def test_check_availability_survives_tmdb_errors(conn):
+    import requests
+
+    from pynetflix.availability import watch
+
+    class FlakyTMDB(FakeTMDB):
+        broken: set[int] = set()
+
+        def watch_providers(self, tmdb_id, kind):
+            if tmdb_id in self.broken:
+                raise requests.HTTPError("404 Client Error: Not Found")
+            return super().watch_providers(tmdb_id, kind)
+
+    import_viewing_activity_csv(conn, FIXTURES / "NetflixViewingHistory.csv", "Valentin")
+    tmdb = FlakyTMDB()
+    enrich_titles(conn, tmdb, "RO")
+    total = conn.execute("SELECT COUNT(*) FROM titles WHERE tmdb_id IS NOT NULL").fetchone()[0]
+
+    # Dark's TMDB lookup fails and Stranger Things has left: the run still checks everything
+    # else, and Dark keeps its previous status instead of being marked removed.
+    tmdb.broken = {FakeTMDB.CATALOG[("series", "dark")]["id"]}
+    tmdb.available.discard("stranger things")
+    r = check_availability(conn, tmdb, "RO")
+    assert (r.checked, r.failed, r.newly_removed) == (total - 1, 1, 1)
+    status = dict(conn.execute("SELECT name, netflix_status FROM titles").fetchall())
+    assert status["Dark"] == "available" and status["Stranger Things"] == "removed"
+
+    report = watch(conn, tmdb, "RO")
+    assert report["failed"] == 1 and report["checked"] == total - 1
