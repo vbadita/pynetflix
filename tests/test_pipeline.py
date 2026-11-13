@@ -1,5 +1,7 @@
-from datetime import date
+import time
+from datetime import date, timedelta, timezone
 
+import pytest
 from conftest import FIXTURES, FakeTMDB
 
 from pynetflix import stats
@@ -194,3 +196,37 @@ def test_check_availability_survives_tmdb_errors(conn):
 
     report = watch(conn, tmdb, "RO")
     assert report["failed"] == 1 and report["checked"] == total - 1
+
+
+def test_local_hour_converts_utc_watch_times():
+    bucharest_winter = timezone(timedelta(hours=2))
+    assert stats._local_hour("2024-01-10T21:30:00Z", bucharest_winter) == 23
+    assert stats._local_hour("2024-01-10T22:15:00", bucharest_winter) == 0
+    assert stats._local_hour("2024-01-10T21:30:00Z", timezone.utc) == 21
+    assert stats._local_hour("2024-01-10T21:30:00+00:00", timezone(timedelta(hours=-5))) == 16
+
+
+@pytest.mark.skipif(not hasattr(time, "tzset"), reason="needs time.tzset")
+def test_wrapped_night_owl_share_uses_local_time(conn, monkeypatch, tmp_path):
+    # 21:30 and 22:00 UTC are 23:30 and 00:00 in Bucharest (UTC+2 in January).
+    path = tmp_path / "ViewingActivity.csv"
+    path.write_text(
+        "Profile Name,Start Time,Duration,Attributes,Title,Supplemental Video Type,Device Type,"
+        "Bookmark,Latest Bookmark,Country\n"
+        "Valentin,2024-01-10 21:30:00,00:40:00,,The Irishman,,TV,,,RO (Romania)\n"
+        "Valentin,2024-01-11 22:00:00,00:50:00,,Mission: Impossible,,TV,,,RO (Romania)\n"
+        "Valentin,2024-01-12 12:00:00,00:30:00,,Dark: Season 1: Secrets,,TV,,,RO (Romania)\n"
+    )
+    import_data_export(conn, path)
+
+    monkeypatch.setenv("TZ", "UTC")
+    time.tzset()
+    assert stats.wrapped(conn, year=2024)["night_owl_share"] == 0
+
+    monkeypatch.setenv("TZ", "Europe/Bucharest")
+    time.tzset()
+    try:
+        assert stats.wrapped(conn, year=2024)["night_owl_share"] == round(2 / 3, 2)
+    finally:
+        monkeypatch.undo()
+        time.tzset()
