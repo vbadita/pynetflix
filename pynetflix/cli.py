@@ -152,7 +152,7 @@ def main(argv: list[str] | None = None) -> None:
         country = resolve_country(conn, cfg.country)
         r = enrich_titles(conn, _tmdb(cfg), country, refresh=args.refresh, limit=args.limit)
         print(f"{r.enriched} enriched, {r.not_found} not found on TMDB, "
-              f"{r.reclassified} re-classified as series")
+              f"{r.reclassified} re-classified as series, {r.episodes_filled} episode numbers filled")
 
     elif args.cmd == "check-availability":
         from .availability import check_availability, resolve_country
