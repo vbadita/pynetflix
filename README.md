@@ -100,7 +100,7 @@ your imported data-export viewings (falling back to `US` when there are none).
 | `status` | What's loaded, what's been removed, and what to run next |
 | `import FILE` | Viewing Activity CSV (`--profile` needed) or the personal-data export ZIP |
 | `login` / `sync` | Log in once in a real browser window, then pull history for all profiles |
-| `enrich` | TMDB genres, cast, runtime, season/episode counts, episode numbers, availability |
+| `enrich` | TMDB genres, cast, runtime, season/episode counts, episode numbers, availability. Re-run after new imports: it also fills episode numbers for new episodes of already-enriched shows |
 | `check-availability` | Re-check which watched titles are still on Netflix |
 | `watch` | Daily routine: sync (if logged in) + check availability, then report what newly left / is leaving soon |
 | `removed` / `leaving` | Titles that left Netflix / have an announced last day |

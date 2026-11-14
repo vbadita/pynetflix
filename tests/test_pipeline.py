@@ -230,3 +230,26 @@ def test_wrapped_night_owl_share_uses_local_time(conn, monkeypatch, tmp_path):
     finally:
         monkeypatch.undo()
         time.tzset()
+
+
+def test_enrich_fills_episode_numbers_for_later_imports(conn, tmp_path):
+    first = tmp_path / "first.csv"
+    first.write_text('Title,Date\n"Dark: Season 1: Secrets","3/15/24"\n', encoding="utf-8")
+    import_viewing_activity_csv(conn, first, "Valentin")
+    tmdb = FakeTMDB()
+    assert enrich_titles(conn, tmdb, "RO").episodes_filled == 1
+
+    # New episodes of an already enriched show arrive later (CSV import or sync).
+    later = tmp_path / "later.csv"
+    later.write_text('Title,Date\n"Dark: Season 1: Lies","3/16/24"\n'
+                     '"Dark: Season 1: Past and Present","3/17/24"\n', encoding="utf-8")
+    import_viewing_activity_csv(conn, later, "Valentin")
+    r = enrich_titles(conn, tmdb, "RO")
+    assert r.enriched == 0 and r.episodes_filled == 2
+    assert sorted(h["episode_number"] for h in stats.history(conn, search="Dark")) == [1, 2, 3]
+
+    # Nothing left to fill: the next run doesn't look up any seasons.
+    calls = []
+    tmdb.season = lambda tmdb_id, n: calls.append((tmdb_id, n)) or {"episodes": []}
+    assert enrich_titles(conn, tmdb, "RO").episodes_filled == 0
+    assert calls == []
