@@ -10,6 +10,8 @@ from pathlib import Path
 import requests
 
 TRAKT_API = "https://api.trakt.tv"
+TRAKT_REDIRECT_URI = "urn:ietf:wg:oauth:2.0:oob"  # what device-flow apps use
+TOKEN_REFRESH_MARGIN = 3600  # refresh this many seconds before the access token expires
 
 EXPORT_COLUMNS = ["profile", "watched_on", "watched_at", "title", "kind", "season_number",
                   "episode_number", "episode_title", "duration_seconds", "device", "year",
@@ -72,17 +74,36 @@ class Trakt:
                 "code": code["device_code"], "client_id": self.client_id,
                 "client_secret": self.client_secret})
             if resp.status_code == 200:
-                self.token_path.write_text(json.dumps(resp.json()))
-                self.token_path.chmod(0o600)
+                self._save_token(resp.json())
                 return
             if resp.status_code not in (400, 429):  # 400 = still pending
                 resp.raise_for_status()
         raise TimeoutError("Trakt device code expired before it was approved")
 
+    def _save_token(self, token: dict) -> None:
+        self.token_path.write_text(json.dumps(token))
+        self.token_path.chmod(0o600)
+
+    def _refresh(self, token: dict) -> dict:
+        resp = self.session.post(f"{TRAKT_API}/oauth/token", json={
+            "refresh_token": token["refresh_token"], "client_id": self.client_id,
+            "client_secret": self.client_secret, "redirect_uri": TRAKT_REDIRECT_URI,
+            "grant_type": "refresh_token"})
+        if resp.status_code in (400, 401, 403):  # refresh token revoked or expired too
+            raise RuntimeError("Trakt session expired. Run: pynetflix trakt login")
+        resp.raise_for_status()
+        new = resp.json()
+        self._save_token(new)
+        return new
+
     def _auth(self) -> None:
         if not self.token_path.exists():
             raise RuntimeError("Not logged in to Trakt. Run: pynetflix trakt login")
         token = json.loads(self.token_path.read_text())
+        created, lifetime = token.get("created_at"), token.get("expires_in")
+        if (created is not None and lifetime is not None and token.get("refresh_token")
+                and time.time() >= created + lifetime - TOKEN_REFRESH_MARGIN):
+            token = self._refresh(token)
         self.session.headers["Authorization"] = f"Bearer {token['access_token']}"
 
     def push_history(self, conn: sqlite3.Connection, profile: str | None = None,
