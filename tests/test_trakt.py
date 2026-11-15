@@ -118,3 +118,49 @@ def test_login_times_out(tmp_path, monkeypatch):
         "verification_url": "u", "user_code": "X", "device_code": "d", "expires_in": -1, "interval": 1})])
     with pytest.raises(TimeoutError):
         make_trakt(tmp_path, session, token=False).login(prompt=lambda m: None)
+
+
+def write_token(t, **token):
+    t.token_path.write_text(json.dumps({"access_token": "old", "refresh_token": "ref", **token}))
+
+
+def test_push_refreshes_expired_token(conn, tmp_path, monkeypatch):
+    enriched(conn)
+    monkeypatch.setattr(exporters.time, "time", lambda: 1_000_000)
+    session = FakeSession(responses=[FakeResponse(body={
+        "access_token": "fresh", "refresh_token": "ref2", "created_at": 1_000_000, "expires_in": 86400})])
+    t = make_trakt(tmp_path, session, token=False)
+    write_token(t, created_at=1_000_000 - 86400, expires_in=86400)
+    t.push_history(conn)
+
+    url, body = session.calls[0]
+    assert url == f"{exporters.TRAKT_API}/oauth/token"
+    assert body["grant_type"] == "refresh_token" and body["refresh_token"] == "ref"
+    assert body["client_id"] == "cid" and body["client_secret"] == "secret"
+    assert session.calls[1][0] == f"{exporters.TRAKT_API}/sync/history"
+    assert session.headers["Authorization"] == "Bearer fresh"
+    saved = json.loads(t.token_path.read_text())
+    assert saved["access_token"] == "fresh" and saved["refresh_token"] == "ref2"
+    assert oct(t.token_path.stat().st_mode & 0o777) == "0o600"
+
+
+def test_push_keeps_valid_token(conn, tmp_path, monkeypatch):
+    enriched(conn)
+    monkeypatch.setattr(exporters.time, "time", lambda: 1_000_000)
+    session = FakeSession()
+    t = make_trakt(tmp_path, session, token=False)
+    write_token(t, created_at=1_000_000 - 60, expires_in=86400)
+    t.push_history(conn)
+    assert all(url.endswith("/sync/history") for url, _ in session.calls)
+    assert session.headers["Authorization"] == "Bearer old"
+
+
+def test_push_asks_for_login_when_refresh_rejected(conn, tmp_path, monkeypatch):
+    enriched(conn)
+    monkeypatch.setattr(exporters.time, "time", lambda: 1_000_000)
+    session = FakeSession(responses=[FakeResponse(status_code=401)])
+    t = make_trakt(tmp_path, session, token=False)
+    write_token(t, created_at=0, expires_in=86400)
+    with pytest.raises(RuntimeError, match="trakt login"):
+        t.push_history(conn)
+    assert len(session.calls) == 1
