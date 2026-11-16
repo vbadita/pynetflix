@@ -263,7 +263,9 @@ def abandoned(conn: sqlite3.Connection, profile: str | None = None, idle_days: i
     rows = conn.execute(
         f"""SELECT t.id, t.name, p.name AS profile, t.total_seasons, t.total_episodes, t.series_status,
                    t.last_air_date, t.netflix_status,
-                   COUNT(DISTINCT v.dedup_key) AS episodes_watched,
+                   -- dedup_key is "title|season|episode|YYYY-MM-DD": drop the date so an episode
+                   -- rewatched, or finished the next day, still counts once.
+                   COUNT(DISTINCT substr(v.dedup_key, 1, length(v.dedup_key) - 11)) AS episodes_watched,
                    MAX(v.season_number) AS last_season_watched, MAX(v.watched_on) AS last_watched_on
             FROM viewings v JOIN titles t ON t.id = v.title_id JOIN profiles p ON p.id = v.profile_id
             WHERE t.kind = 'series' {profile_sql}
