@@ -253,3 +253,16 @@ def test_enrich_fills_episode_numbers_for_later_imports(conn, tmp_path):
     tmdb.season = lambda tmdb_id, n: calls.append((tmdb_id, n)) or {"episodes": []}
     assert enrich_titles(conn, tmdb, "RO").episodes_filled == 0
     assert calls == []
+
+
+def test_abandoned_counts_rewatched_episodes_once(conn, tmp_path):
+    # Dark S1 has 4 episodes; 3 watched, one of them again on a later day.
+    import_viewing_activity_csv(conn, FIXTURES / "NetflixViewingHistory.csv", "Valentin")
+    rewatch = tmp_path / "rewatch.csv"
+    rewatch.write_text('Title,Date\n"Dark: Season 1: Secrets","3/20/24"\n')
+    import_viewing_activity_csv(conn, rewatch, "Valentin")
+    conn.execute("UPDATE titles SET total_episodes = 4 WHERE name = 'Dark'")
+
+    dark = [a for a in stats.abandoned(conn, profile="Valentin") if a["title"] == "Dark"]
+    assert len(dark) == 1  # not mistaken for finished
+    assert dark[0]["episodes_watched"] == 3
