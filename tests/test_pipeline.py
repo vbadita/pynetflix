@@ -266,3 +266,61 @@ def test_abandoned_counts_rewatched_episodes_once(conn, tmp_path):
     dark = [a for a in stats.abandoned(conn, profile="Valentin") if a["title"] == "Dark"]
     assert len(dark) == 1  # not mistaken for finished
     assert dark[0]["episodes_watched"] == 3
+
+
+def test_export_dates_viewings_by_local_day(conn, tmp_path):
+    # 22:30 UTC on 15 March is 00:30 on 16 March in Bucharest (UTC+2), where the CSV lists it.
+    bucharest = timezone(timedelta(hours=2))
+    csv_path = tmp_path / "NetflixViewingHistory.csv"
+    csv_path.write_text('Title,Date\n"Dark: Season 1: Lies","3/16/24"\n', encoding="utf-8")
+    export = tmp_path / "ViewingActivity.csv"
+    export.write_text(
+        "Profile Name,Start Time,Duration,Attributes,Title,Supplemental Video Type,Device Type,"
+        "Bookmark,Latest Bookmark,Country\n"
+        "Valentin,2024-03-15 22:30:00,00:20:00,,Dark: Season 1: Lies,,TV,,,RO (Romania)\n"
+        "Valentin,2024-03-15 21:50:00,00:24:00,,Dark: Season 1: Lies,,TV,,,RO (Romania)\n"
+    )
+    import_viewing_activity_csv(conn, csv_path, "Valentin")
+    r = import_data_export(conn, export, tz=bucharest)
+    # 21:50 UTC is 23:50 local on the 15th: a separate day, so it stays a separate viewing.
+    assert (r.added, r.merged) == (1, 1)
+    rows = {h["watched_on"]: h for h in stats.history(conn)}
+    assert rows["2024-03-16"]["watched_at"] == "2024-03-15T22:30:00Z"
+    assert rows["2024-03-16"]["duration_seconds"] == 20 * 60
+    assert rows["2024-03-15"]["duration_seconds"] == 24 * 60
+
+
+@pytest.mark.skipif(not hasattr(time, "tzset"), reason="needs time.tzset")
+def test_connect_moves_old_utc_dates_to_local_days(tmp_path, monkeypatch):
+    from pynetflix import db
+
+    path = tmp_path / "old.db"
+    old = db.connect(path)
+    csv_path = tmp_path / "NetflixViewingHistory.csv"
+    csv_path.write_text('Title,Date\n"Dark: Season 1: Lies","3/16/24"\n', encoding="utf-8")
+    import_viewing_activity_csv(old, csv_path, "Valentin")
+    export = tmp_path / "ViewingActivity.csv"
+    export.write_text(
+        "Profile Name,Start Time,Duration,Attributes,Title,Supplemental Video Type,Device Type,"
+        "Bookmark,Latest Bookmark,Country\n"
+        "Valentin,2024-03-15 22:30:00,00:20:00,,Dark: Season 1: Lies,,TV,,,RO (Romania)\n"
+        "Valentin,2024-03-16 22:40:00,00:50:00,,The Irishman,,TV,,,RO (Romania)\n"
+        "Valentin,2024-03-17 22:40:00,00:50:00,,The Irishman,,TV,,,RO (Romania)\n"
+    )
+    import_data_export(old, export)  # TZ is UTC: stored on the UTC days, like older versions
+    with old:
+        old.execute("PRAGMA user_version = 0")
+    old.close()
+
+    monkeypatch.setenv("TZ", "Europe/Bucharest")
+    time.tzset()
+    conn = db.connect(path)
+    assert conn.execute("PRAGMA user_version").fetchone()[0] == 1
+    rows = [(h["title"], h["watched_on"], h["duration_seconds"]) for h in stats.history(conn)]
+    # Lies merges into the CSV's row; each Irishman viewing moves a day without merging.
+    assert sorted(rows) == [("Dark", "2024-03-16", 20 * 60),
+                            ("The Irishman", "2024-03-17", 50 * 60),
+                            ("The Irishman", "2024-03-18", 50 * 60)]
+    # Re-importing the export now lines up with the migrated rows instead of duplicating them.
+    r = import_data_export(conn, export)
+    assert (r.added, r.merged) == (0, 3)

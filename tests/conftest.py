@@ -1,3 +1,4 @@
+import time
 from pathlib import Path
 
 import pytest
@@ -5,6 +6,19 @@ import pytest
 from pynetflix import db
 
 FIXTURES = Path(__file__).parent / "fixtures"
+
+
+@pytest.fixture(autouse=True)
+def utc_local_time(monkeypatch):
+    """Viewings are dated in local time; pin it so results don't depend on the machine."""
+    if not hasattr(time, "tzset"):
+        yield
+        return
+    monkeypatch.setenv("TZ", "UTC")
+    time.tzset()
+    yield
+    monkeypatch.undo()
+    time.tzset()
 
 
 @pytest.fixture
