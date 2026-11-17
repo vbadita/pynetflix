@@ -47,7 +47,9 @@ pynetflix serve                      # REST API on http://127.0.0.1:8000 (docs a
 
 Importing the same data twice is safe. Viewings are matched across sources, so the CSV, the
 data export and sync can all be combined. The data export gives the richest data: exact
-timestamps, watch time, device and episode numbers.
+timestamps, watch time, device and episode numbers. Its timestamps are UTC; viewings are
+dated by the local day (your machine's timezone, or `TZ`), the same way Netflix's Viewing
+Activity page dates them, so a 00:30 episode lands on the day you actually watched it.
 
 ## "Removed from Netflix" column
 

@@ -94,7 +94,7 @@ def _store_items(conn: sqlite3.Connection, profile_id: int, items: list[dict], r
             raw = item.get("title") or parsed.name
             new = db.upsert_viewing(
                 conn, profile_id=profile_id, title_id=title_id, parsed=parsed, raw_title=raw,
-                watched_on=ts.date().isoformat() if ts else item["dateStr"], source="sync",
+                watched_on=db.local_date(ts) if ts else item["dateStr"], source="sync",
                 watched_at=ts.strftime("%Y-%m-%dT%H:%M:%SZ") if ts else None,
                 duration_seconds=item.get("duration"),
                 device=item.get("deviceType") and str(item["deviceType"]),
