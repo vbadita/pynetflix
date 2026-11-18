@@ -47,7 +47,9 @@ pynetflix serve                      # REST API on http://127.0.0.1:8000 (docs a
 
 Importing the same data twice is safe. Viewings are matched across sources, so the CSV, the
 data export and sync can all be combined. The data export gives the richest data: exact
-timestamps, watch time, device and episode numbers.
+timestamps, watch time, device and episode numbers. Its timestamps are UTC; viewings are
+dated by the local day (your machine's timezone, or `TZ`), the same way Netflix's Viewing
+Activity page dates them, so a 00:30 episode lands on the day you actually watched it.
 
 ## "Removed from Netflix" column
 
@@ -85,6 +87,10 @@ soon. Use it in cron instead of `check-availability`:
 0 9 * * * TMDB_API_KEY=... NETFLIX_COUNTRY=RO pynetflix watch   # cron mails the output to you
 ```
 
+If TMDB fails for a title (a timeout, a server error, an entry TMDB has deleted), that title
+keeps its previous status and is retried on the next run. The rest of the check still runs, and
+the number of skipped titles is printed to stderr.
+
 On the first run, titles removed long ago get a wide window, from your last watch to today.
 Availability differs by country. Unless `NETFLIX_COUNTRY` is set, pynetflix uses the country most common in
 your imported data-export viewings (falling back to `US` when there are none).
@@ -96,7 +102,7 @@ your imported data-export viewings (falling back to `US` when there are none).
 | `status` | What's loaded, what's been removed, and what to run next |
 | `import FILE` | Viewing Activity CSV (`--profile` needed) or the personal-data export ZIP |
 | `login` / `sync` | Log in once in a real browser window, then pull history for all profiles |
-| `enrich` | TMDB genres, cast, runtime, season/episode counts, episode numbers, availability |
+| `enrich` | TMDB genres, cast, runtime, season/episode counts, episode numbers, availability. Re-run after new imports: it also fills episode numbers for new episodes of already-enriched shows |
 | `check-availability` | Re-check which watched titles are still on Netflix |
 | `watch` | Daily routine: sync (if logged in) + check availability, then report what newly left / is leaving soon |
 | `removed` / `leaving` | Titles that left Netflix / have an announced last day |
@@ -108,7 +114,7 @@ your imported data-export viewings (falling back to `US` when there are none).
 | `abandoned` | Shows you stopped watching, flagging those with a new season out |
 | `shared` | Overlap between profiles and "watch together" suggestions |
 | `letterboxd OUT.csv` | Letterboxd import file (movies) |
-| `trakt login` / `trakt push` | Sync history to Trakt (needs `TRAKT_CLIENT_ID` / `TRAKT_CLIENT_SECRET`) |
+| `trakt login` / `trakt push` | Sync history to Trakt (needs `TRAKT_CLIENT_ID` / `TRAKT_CLIENT_SECRET`). `push` refreshes an expiring Trakt token by itself, so `login` is only needed once |
 | `serve` | REST API (FastAPI): `/profiles`, `/history`, `/titles`, `/titles/removed`, `/ratings`, `/wrapped`, `/wrapped.html` (with previous/next month and year links), ... Paged endpoints (`/history`, `/profiles/{name}/history`, `/titles`) return the total number of matches in an `X-Total-Count` header, so `limit`/`offset` clients know when to stop. |
 | `mcp` | MCP server for assistants |
 

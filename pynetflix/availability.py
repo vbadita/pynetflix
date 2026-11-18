@@ -15,6 +15,8 @@ Nobody publishes a free, reliable "removed on" date, so we derive one:
 import sqlite3
 from dataclasses import dataclass
 
+import requests
+
 from . import db
 from .tmdb import TMDB, on_netflix
 
@@ -68,6 +70,7 @@ class AvailabilityResult:
     still_available: int = 0
     newly_removed: int = 0
     back_on_netflix: int = 0
+    failed: int = 0  # TMDB lookups that errored; those titles keep their previous status
 
 
 def resolve_country(conn: sqlite3.Connection, configured: str | None, default: str = "US") -> str:
@@ -91,7 +94,14 @@ def check_availability(conn: sqlite3.Connection, tmdb: TMDB, country: str,
         query += " AND netflix_status = ?"
         params = (only_status,)
     for row in conn.execute(query, params).fetchall():
-        available = on_netflix(tmdb.watch_providers(row["tmdb_id"], row["kind"]), country)
+        try:
+            providers = tmdb.watch_providers(row["tmdb_id"], row["kind"])
+        except requests.RequestException:
+            # One bad lookup (a TMDB id that was deleted, a timeout, a 5xx) shouldn't abort the
+            # daily run for every other title. Leave this one as it was and retry next time.
+            result.failed += 1
+            continue
+        available = on_netflix(providers, country)
         with conn:
             record_availability(conn, row["id"], country, available)
         result.checked += 1
@@ -141,5 +151,5 @@ def watch(conn: sqlite3.Connection, tmdb: TMDB, country: str) -> dict:
         return [db.row_to_dict(r) for r in conn.execute(
             f"SELECT * FROM titles_view WHERE id IN ({marks}) ORDER BY name", ids)]
 
-    return {"checked": result.checked, "newly_left": titles(left), "back_on_netflix": titles(back),
-            "leaving_soon": leaving_soon(conn)}
+    return {"checked": result.checked, "failed": result.failed, "newly_left": titles(left),
+            "back_on_netflix": titles(back), "leaving_soon": leaving_soon(conn)}

@@ -10,7 +10,7 @@ import io
 import sqlite3
 import zipfile
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, tzinfo
 from pathlib import Path
 
 from . import db
@@ -135,8 +135,11 @@ def import_my_list(conn: sqlite3.Connection, path: Path | str) -> int:
 
 
 def import_data_export(conn: sqlite3.Connection, path: Path | str,
-                       min_seconds: int = 60) -> ImportResult:
-    """Import the personal-data export (ZIP or its ViewingActivity.csv)."""
+                       min_seconds: int = 60, tz: tzinfo | None = None) -> ImportResult:
+    """Import the personal-data export (ZIP or its ViewingActivity.csv).
+
+    Start times in the export are UTC; viewings are dated by the local day they started on
+    (``tz``, default: the machine's timezone), like Netflix's own Viewing Activity page."""
     result = ImportResult()
     # Netflix logs one row per playback session; fold sessions of the same episode on the
     # same day into one viewing so it lines up with the CSV and sync sources.
@@ -158,7 +161,7 @@ def import_data_export(conn: sqlite3.Connection, path: Path | str,
             if not (r.get("Profile Name") and r.get("Title")):
                 result.skipped += 1
                 continue
-            key = (r["Profile Name"], r["Title"], started.date().isoformat())
+            key = (r["Profile Name"], r["Title"], db.local_date(started, tz))
             g = grouped.get(key)
             if g is None:
                 grouped[key] = {"start": started, "seconds": seconds,
