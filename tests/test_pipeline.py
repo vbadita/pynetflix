@@ -182,6 +182,20 @@ def test_export_skips_malformed_rows(conn, tmp_path):
     assert result.skipped == 3
 
 
+def test_leaving_soon_uses_local_date(conn, monkeypatch):
+    from pynetflix import db
+    from pynetflix.availability import leaving_soon
+
+    import_viewing_activity_csv(conn, FIXTURES / "NetflixViewingHistory.csv", "Valentin")
+    title_id = conn.execute("SELECT id FROM titles WHERE normalized_name = 'dark'").fetchone()[0]
+    record_leaving_notice(conn, title_id, "2024-06-30")
+    # The last day counts as "leaving soon" until it is over in local time, whatever UTC says.
+    monkeypatch.setattr(db, "today", lambda: "2024-06-30")
+    assert [t["name"] for t in leaving_soon(conn)] == ["Dark"]
+    assert [t["name"] for t in leaving_soon(conn, today="2024-06-29")] == ["Dark"]
+    assert leaving_soon(conn, today="2024-07-01") == []
+
+
 def test_check_availability_survives_tmdb_errors(conn):
     import requests
 
