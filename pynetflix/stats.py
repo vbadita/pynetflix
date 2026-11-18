@@ -3,7 +3,7 @@
 import json
 import sqlite3
 from collections import Counter, defaultdict
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timedelta, timezone, tzinfo
 
 from . import db
 
@@ -166,6 +166,19 @@ def _estimated_seconds(row: sqlite3.Row) -> int:
     return 45 * 60 if row["kind"] == "series" else 100 * 60
 
 
+def _local_hour(watched_at: str, tz: tzinfo | None = None) -> int:
+    """Hour of day a viewing started, in local time.
+
+    watched_at is stored in UTC ("...Z"). Without converting it, a 23:30 episode in
+    Bucharest (21:30 UTC) would not count towards the night-owl share.
+    tz=None uses the machine's local timezone.
+    """
+    ts = datetime.fromisoformat(watched_at.rstrip("Z"))
+    if ts.tzinfo is None:
+        ts = ts.replace(tzinfo=timezone.utc)
+    return ts.astimezone(tz).hour
+
+
 def wrapped(conn: sqlite3.Connection, profile: str | None = None, year: int | None = None,
             month: int | None = None) -> dict:
     """Spotify-Wrapped style recap for a year (or a single month)."""
@@ -200,7 +213,7 @@ def wrapped(conn: sqlite3.Connection, profile: str | None = None, year: int | No
         days[r["watched_on"]] += secs
         weekdays[date.fromisoformat(r["watched_on"]).strftime("%A")] += secs
         if r["watched_at"]:
-            hours[datetime.fromisoformat(r["watched_at"].rstrip("Z")).hour] += 1
+            hours[_local_hour(r["watched_at"])] += 1
         if r["kind"] == "series":
             episodes_per_day[(r["watched_on"], r["title"])] += 1
 
@@ -250,7 +263,9 @@ def abandoned(conn: sqlite3.Connection, profile: str | None = None, idle_days: i
     rows = conn.execute(
         f"""SELECT t.id, t.name, p.name AS profile, t.total_seasons, t.total_episodes, t.series_status,
                    t.last_air_date, t.netflix_status,
-                   COUNT(DISTINCT v.dedup_key) AS episodes_watched,
+                   -- dedup_key is "title|season|episode|YYYY-MM-DD": drop the date so an episode
+                   -- rewatched, or finished the next day, still counts once.
+                   COUNT(DISTINCT substr(v.dedup_key, 1, length(v.dedup_key) - 11)) AS episodes_watched,
                    MAX(v.season_number) AS last_season_watched, MAX(v.watched_on) AS last_watched_on
             FROM viewings v JOIN titles t ON t.id = v.title_id JOIN profiles p ON p.id = v.profile_id
             WHERE t.kind = 'series' {profile_sql}

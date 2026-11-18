@@ -2,7 +2,7 @@
 
 import json
 import sqlite3
-from datetime import date
+from datetime import date, datetime, timezone, tzinfo
 from pathlib import Path
 
 from .parsing import ParsedTitle, normalize
@@ -118,7 +118,55 @@ def connect(path: Path | str) -> sqlite3.Connection:
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys = ON")
     conn.executescript(SCHEMA)
+    if conn.execute("PRAGMA user_version").fetchone()[0] < 1:
+        with conn:
+            _migrate_to_local_dates(conn)
+            conn.execute("PRAGMA user_version = 1")
     return conn
+
+
+def local_date(utc: datetime, tz: tzinfo | None = None) -> str:
+    """Calendar day a UTC timestamp falls on in local time (tz=None: the machine's timezone).
+
+    Netflix's Viewing Activity page and CSV list days in your local time, while the data export
+    and sync give UTC timestamps. Using the UTC day would put a 00:30 episode in Bucharest
+    (22:30 UTC) on the previous day, so it would no longer merge with the CSV's row for it.
+    """
+    if utc.tzinfo is None:
+        utc = utc.replace(tzinfo=timezone.utc)
+    return utc.astimezone(tz).date().isoformat()
+
+
+def _migrate_to_local_dates(conn: sqlite3.Connection) -> None:
+    """Older versions stored the UTC day for export/sync viewings; move them to the local day."""
+    moving = []
+    for v in conn.execute("SELECT * FROM viewings WHERE source IN ('export', 'sync') "
+                          "AND watched_at IS NOT NULL").fetchall():
+        day = local_date(datetime.fromisoformat(v["watched_at"].rstrip("Z")))
+        if day != v["watched_on"]:
+            moving.append((v, day))
+    # Free the old keys first, so a viewing can move onto a day another one is leaving.
+    for v, _ in moving:
+        conn.execute("UPDATE viewings SET dedup_key = ? WHERE id = ?", (f"migrating|{v['id']}", v["id"]))
+    for v, day in moving:
+        key = v["dedup_key"][: -len(v["watched_on"])] + day
+        clash = conn.execute("SELECT id FROM viewings WHERE profile_id = ? AND dedup_key = ?",
+                             (v["profile_id"], key)).fetchone()
+        if clash is None:
+            conn.execute("UPDATE viewings SET watched_on = ?, dedup_key = ? WHERE id = ?",
+                         (day, key, v["id"]))
+            continue
+        # Same episode on the same local day (e.g. already imported from the CSV): merge.
+        conn.execute(
+            """UPDATE viewings SET
+                   watched_at = COALESCE(MIN(watched_at, ?), watched_at, ?),
+                   duration_seconds = MAX(COALESCE(duration_seconds, 0), COALESCE(?, 0)),
+                   episode_number = COALESCE(episode_number, ?),
+                   device = COALESCE(device, ?), country = COALESCE(country, ?)
+               WHERE id = ?""",
+            (v["watched_at"], v["watched_at"], v["duration_seconds"], v["episode_number"],
+             v["device"], v["country"], clash["id"]))
+        conn.execute("DELETE FROM viewings WHERE id = ?", (v["id"],))
 
 
 def get_or_create_profile(conn: sqlite3.Connection, name: str, guid: str | None = None) -> int:

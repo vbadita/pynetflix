@@ -1,5 +1,7 @@
-from datetime import date
+import time
+from datetime import date, timedelta, timezone
 
+import pytest
 from conftest import FIXTURES, FakeTMDB
 
 from pynetflix import stats
@@ -177,3 +179,162 @@ def test_leaving_soon_uses_local_date(conn, monkeypatch):
     assert [t["name"] for t in leaving_soon(conn)] == ["Dark"]
     assert [t["name"] for t in leaving_soon(conn, today="2024-06-29")] == ["Dark"]
     assert leaving_soon(conn, today="2024-07-01") == []
+
+
+def test_check_availability_survives_tmdb_errors(conn):
+    import requests
+
+    from pynetflix.availability import watch
+
+    class FlakyTMDB(FakeTMDB):
+        broken: set[int] = set()
+
+        def watch_providers(self, tmdb_id, kind):
+            if tmdb_id in self.broken:
+                raise requests.HTTPError("404 Client Error: Not Found")
+            return super().watch_providers(tmdb_id, kind)
+
+    import_viewing_activity_csv(conn, FIXTURES / "NetflixViewingHistory.csv", "Valentin")
+    tmdb = FlakyTMDB()
+    enrich_titles(conn, tmdb, "RO")
+    total = conn.execute("SELECT COUNT(*) FROM titles WHERE tmdb_id IS NOT NULL").fetchone()[0]
+
+    # Dark's TMDB lookup fails and Stranger Things has left: the run still checks everything
+    # else, and Dark keeps its previous status instead of being marked removed.
+    tmdb.broken = {FakeTMDB.CATALOG[("series", "dark")]["id"]}
+    tmdb.available.discard("stranger things")
+    r = check_availability(conn, tmdb, "RO")
+    assert (r.checked, r.failed, r.newly_removed) == (total - 1, 1, 1)
+    status = dict(conn.execute("SELECT name, netflix_status FROM titles").fetchall())
+    assert status["Dark"] == "available" and status["Stranger Things"] == "removed"
+
+    report = watch(conn, tmdb, "RO")
+    assert report["failed"] == 1 and report["checked"] == total - 1
+
+
+def test_local_hour_converts_utc_watch_times():
+    bucharest_winter = timezone(timedelta(hours=2))
+    assert stats._local_hour("2024-01-10T21:30:00Z", bucharest_winter) == 23
+    assert stats._local_hour("2024-01-10T22:15:00", bucharest_winter) == 0
+    assert stats._local_hour("2024-01-10T21:30:00Z", timezone.utc) == 21
+    assert stats._local_hour("2024-01-10T21:30:00+00:00", timezone(timedelta(hours=-5))) == 16
+
+
+@pytest.mark.skipif(not hasattr(time, "tzset"), reason="needs time.tzset")
+def test_wrapped_night_owl_share_uses_local_time(conn, monkeypatch, tmp_path):
+    # 21:30 and 22:00 UTC are 23:30 and 00:00 in Bucharest (UTC+2 in January).
+    path = tmp_path / "ViewingActivity.csv"
+    path.write_text(
+        "Profile Name,Start Time,Duration,Attributes,Title,Supplemental Video Type,Device Type,"
+        "Bookmark,Latest Bookmark,Country\n"
+        "Valentin,2024-01-10 21:30:00,00:40:00,,The Irishman,,TV,,,RO (Romania)\n"
+        "Valentin,2024-01-11 22:00:00,00:50:00,,Mission: Impossible,,TV,,,RO (Romania)\n"
+        "Valentin,2024-01-12 12:00:00,00:30:00,,Dark: Season 1: Secrets,,TV,,,RO (Romania)\n"
+    )
+    import_data_export(conn, path)
+
+    monkeypatch.setenv("TZ", "UTC")
+    time.tzset()
+    assert stats.wrapped(conn, year=2024)["night_owl_share"] == 0
+
+    monkeypatch.setenv("TZ", "Europe/Bucharest")
+    time.tzset()
+    try:
+        assert stats.wrapped(conn, year=2024)["night_owl_share"] == round(2 / 3, 2)
+    finally:
+        monkeypatch.undo()
+        time.tzset()
+
+
+def test_enrich_fills_episode_numbers_for_later_imports(conn, tmp_path):
+    first = tmp_path / "first.csv"
+    first.write_text('Title,Date\n"Dark: Season 1: Secrets","3/15/24"\n', encoding="utf-8")
+    import_viewing_activity_csv(conn, first, "Valentin")
+    tmdb = FakeTMDB()
+    assert enrich_titles(conn, tmdb, "RO").episodes_filled == 1
+
+    # New episodes of an already enriched show arrive later (CSV import or sync).
+    later = tmp_path / "later.csv"
+    later.write_text('Title,Date\n"Dark: Season 1: Lies","3/16/24"\n'
+                     '"Dark: Season 1: Past and Present","3/17/24"\n', encoding="utf-8")
+    import_viewing_activity_csv(conn, later, "Valentin")
+    r = enrich_titles(conn, tmdb, "RO")
+    assert r.enriched == 0 and r.episodes_filled == 2
+    assert sorted(h["episode_number"] for h in stats.history(conn, search="Dark")) == [1, 2, 3]
+
+    # Nothing left to fill: the next run doesn't look up any seasons.
+    calls = []
+    tmdb.season = lambda tmdb_id, n: calls.append((tmdb_id, n)) or {"episodes": []}
+    assert enrich_titles(conn, tmdb, "RO").episodes_filled == 0
+    assert calls == []
+
+
+def test_abandoned_counts_rewatched_episodes_once(conn, tmp_path):
+    # Dark S1 has 4 episodes; 3 watched, one of them again on a later day.
+    import_viewing_activity_csv(conn, FIXTURES / "NetflixViewingHistory.csv", "Valentin")
+    rewatch = tmp_path / "rewatch.csv"
+    rewatch.write_text('Title,Date\n"Dark: Season 1: Secrets","3/20/24"\n')
+    import_viewing_activity_csv(conn, rewatch, "Valentin")
+    conn.execute("UPDATE titles SET total_episodes = 4 WHERE name = 'Dark'")
+
+    dark = [a for a in stats.abandoned(conn, profile="Valentin") if a["title"] == "Dark"]
+    assert len(dark) == 1  # not mistaken for finished
+    assert dark[0]["episodes_watched"] == 3
+
+
+def test_export_dates_viewings_by_local_day(conn, tmp_path):
+    # 22:30 UTC on 15 March is 00:30 on 16 March in Bucharest (UTC+2), where the CSV lists it.
+    bucharest = timezone(timedelta(hours=2))
+    csv_path = tmp_path / "NetflixViewingHistory.csv"
+    csv_path.write_text('Title,Date\n"Dark: Season 1: Lies","3/16/24"\n', encoding="utf-8")
+    export = tmp_path / "ViewingActivity.csv"
+    export.write_text(
+        "Profile Name,Start Time,Duration,Attributes,Title,Supplemental Video Type,Device Type,"
+        "Bookmark,Latest Bookmark,Country\n"
+        "Valentin,2024-03-15 22:30:00,00:20:00,,Dark: Season 1: Lies,,TV,,,RO (Romania)\n"
+        "Valentin,2024-03-15 21:50:00,00:24:00,,Dark: Season 1: Lies,,TV,,,RO (Romania)\n"
+    )
+    import_viewing_activity_csv(conn, csv_path, "Valentin")
+    r = import_data_export(conn, export, tz=bucharest)
+    # 21:50 UTC is 23:50 local on the 15th: a separate day, so it stays a separate viewing.
+    assert (r.added, r.merged) == (1, 1)
+    rows = {h["watched_on"]: h for h in stats.history(conn)}
+    assert rows["2024-03-16"]["watched_at"] == "2024-03-15T22:30:00Z"
+    assert rows["2024-03-16"]["duration_seconds"] == 20 * 60
+    assert rows["2024-03-15"]["duration_seconds"] == 24 * 60
+
+
+@pytest.mark.skipif(not hasattr(time, "tzset"), reason="needs time.tzset")
+def test_connect_moves_old_utc_dates_to_local_days(tmp_path, monkeypatch):
+    from pynetflix import db
+
+    path = tmp_path / "old.db"
+    old = db.connect(path)
+    csv_path = tmp_path / "NetflixViewingHistory.csv"
+    csv_path.write_text('Title,Date\n"Dark: Season 1: Lies","3/16/24"\n', encoding="utf-8")
+    import_viewing_activity_csv(old, csv_path, "Valentin")
+    export = tmp_path / "ViewingActivity.csv"
+    export.write_text(
+        "Profile Name,Start Time,Duration,Attributes,Title,Supplemental Video Type,Device Type,"
+        "Bookmark,Latest Bookmark,Country\n"
+        "Valentin,2024-03-15 22:30:00,00:20:00,,Dark: Season 1: Lies,,TV,,,RO (Romania)\n"
+        "Valentin,2024-03-16 22:40:00,00:50:00,,The Irishman,,TV,,,RO (Romania)\n"
+        "Valentin,2024-03-17 22:40:00,00:50:00,,The Irishman,,TV,,,RO (Romania)\n"
+    )
+    import_data_export(old, export)  # TZ is UTC: stored on the UTC days, like older versions
+    with old:
+        old.execute("PRAGMA user_version = 0")
+    old.close()
+
+    monkeypatch.setenv("TZ", "Europe/Bucharest")
+    time.tzset()
+    conn = db.connect(path)
+    assert conn.execute("PRAGMA user_version").fetchone()[0] == 1
+    rows = [(h["title"], h["watched_on"], h["duration_seconds"]) for h in stats.history(conn)]
+    # Lies merges into the CSV's row; each Irishman viewing moves a day without merging.
+    assert sorted(rows) == [("Dark", "2024-03-16", 20 * 60),
+                            ("The Irishman", "2024-03-17", 50 * 60),
+                            ("The Irishman", "2024-03-18", 50 * 60)]
+    # Re-importing the export now lines up with the migrated rows instead of duplicating them.
+    r = import_data_export(conn, export)
+    assert (r.added, r.merged) == (0, 3)

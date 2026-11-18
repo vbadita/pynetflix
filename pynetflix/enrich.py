@@ -2,6 +2,7 @@
 
 import json
 import sqlite3
+from collections.abc import Container
 from dataclasses import dataclass
 
 from . import db
@@ -15,6 +16,7 @@ class EnrichResult:
     enriched: int = 0
     not_found: int = 0
     reclassified: int = 0
+    episodes_filled: int = 0
 
 
 def _apply_details(conn: sqlite3.Connection, title_id: int, kind: str, d: dict) -> None:
@@ -67,6 +69,7 @@ def fill_episode_numbers(conn: sqlite3.Connection, tmdb: TMDB, title_id: int, tm
 def enrich_titles(conn: sqlite3.Connection, tmdb: TMDB, country: str,
                   refresh: bool = False, limit: int | None = None) -> EnrichResult:
     result = EnrichResult()
+    done: set[int] = set()
     query = "SELECT id, name, kind, tmdb_id FROM titles"
     if not refresh:
         query += " WHERE enriched_at IS NULL"
@@ -92,9 +95,31 @@ def enrich_titles(conn: sqlite3.Connection, tmdb: TMDB, country: str,
                 tmdb_id = hit["id"]
             details = tmdb.details(tmdb_id, kind)
             _apply_details(conn, title_id, kind, details)
+            done.add(title_id)
             if kind == "series":
-                fill_episode_numbers(conn, tmdb, title_id, tmdb_id)
+                result.episodes_filled += fill_episode_numbers(conn, tmdb, title_id, tmdb_id)
             record_availability(conn, title_id, country,
                                 on_netflix(details.get("watch/providers", {}).get("results", {}), country))
             result.enriched += 1
+    if not refresh:
+        result.episodes_filled += backfill_episode_numbers(conn, tmdb, skip=done)
     return result
+
+
+def backfill_episode_numbers(conn: sqlite3.Connection, tmdb: TMDB, skip: Container[int] = ()) -> int:
+    """Fill episode numbers for viewings added after their series was enriched.
+
+    A later CSV import or sync adds new episodes of a show that is already enriched, so the
+    main enrich pass skips it and those viewings would never get a number (and Trakt would skip
+    them). This only touches series that still have viewings without an episode number.
+    """
+    filled = 0
+    for row in conn.execute(
+            "SELECT DISTINCT t.id, t.tmdb_id FROM titles t JOIN viewings v ON v.title_id = t.id "
+            "WHERE t.kind = 'series' AND t.tmdb_id IS NOT NULL AND t.enriched_at IS NOT NULL "
+            "AND v.season_number IS NOT NULL AND v.episode_number IS NULL").fetchall():
+        if row["id"] in skip:
+            continue  # just enriched in this run; its seasons were already looked up
+        with conn:
+            filled += fill_episode_numbers(conn, tmdb, row["id"], row["tmdb_id"])
+    return filled
