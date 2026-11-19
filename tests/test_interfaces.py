@@ -77,10 +77,26 @@ def test_cli_export_json_and_api_csv(tmp_path):
 def test_letterboxd_and_report(tmp_path):
     _, conn = _seeded(tmp_path)
     out = tmp_path / "lb.csv"
-    assert export_letterboxd(conn, out) == 1
-    assert "The Irishman,2019,398978,2024-02-02" in out.read_text()
+    assert export_letterboxd(conn, out, profile="Kids") == 1
+    assert "The Irishman,2019,398978,2024-02-02,false" in out.read_text()
     html = render_wrapped(wrapped(conn, year=2024))
     assert "<title>Netflix Wrapped</title>" in html and "The Irishman" in html
+
+
+def test_letterboxd_exports_each_watch_and_flags_rewatches(tmp_path):
+    _, conn = _seeded(tmp_path)
+    valentin = db.get_or_create_profile(conn, "Valentin")
+    irishman = conn.execute("SELECT id FROM titles WHERE name = 'The Irishman'").fetchone()["id"]
+    parsed = item_to_parsed({"title": "The Irishman", "date": 0})[0]
+    with conn:
+        db.upsert_viewing(conn, profile_id=valentin, title_id=irishman, parsed=parsed,
+                          raw_title="The Irishman", watched_on="2024-06-01", source="csv")
+    out = tmp_path / "lb.csv"
+    assert export_letterboxd(conn, out, profile="Valentin") == 2
+    rows = list(csv.DictReader(out.open()))
+    assert [(r["WatchedDate"], r["Rewatch"]) for r in rows] == [("2024-02-01", "false"), ("2024-06-01", "true")]
+    # Without a profile, every profile's watches end up in the one diary.
+    assert export_letterboxd(conn, out) == 3
 
 
 def test_mcp_server_tools(tmp_path):

@@ -238,7 +238,7 @@ def main(argv: list[str] | None = None) -> None:
 
     elif args.cmd == "letterboxd":
         from .exporters import export_letterboxd
-        print(f"Wrote {export_letterboxd(conn, args.out, args.profile)} movies to {args.out}")
+        print(f"Wrote {export_letterboxd(conn, args.out, args.profile)} diary entries to {args.out}")
 
     elif args.cmd == "trakt":
         from .exporters import Trakt
