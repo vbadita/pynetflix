@@ -31,22 +31,30 @@ def history_csv_text(rows: list[dict]) -> str:
 
 
 def export_letterboxd(conn: sqlite3.Connection, out: Path | str, profile: str | None = None) -> int:
-    """Write a CSV in Letterboxd's import format (movies only - Letterboxd has no TV)."""
+    """Write a CSV in Letterboxd's import format (movies only - Letterboxd has no TV).
+
+    Each day you watched a movie becomes its own diary entry, and every watch after the first
+    is marked as a rewatch, so a film seen three times shows up three times in your diary.
+    Returns the number of diary entries written."""
     params: list = []
     profile_sql = ""
     if profile:
         profile_sql = "AND p.name = ?"
         params.append(profile)
     rows = conn.execute(
-        f"""SELECT t.name, t.year, t.tmdb_id, MAX(v.watched_on) AS watched_on
+        f"""SELECT DISTINCT t.id, t.name, t.year, t.tmdb_id, v.watched_on
             FROM viewings v JOIN titles t ON t.id = v.title_id JOIN profiles p ON p.id = v.profile_id
             WHERE t.kind = 'movie' {profile_sql}
-            GROUP BY t.id ORDER BY watched_on""", params).fetchall()
+            ORDER BY v.watched_on, t.id""", params).fetchall()
+    seen: set[int] = set()
     with open(out, "w", newline="", encoding="utf-8") as f:
         w = csv.writer(f)
-        w.writerow(["Title", "Year", "tmdbID", "WatchedDate"])
+        w.writerow(["Title", "Year", "tmdbID", "WatchedDate", "Rewatch"])
         for r in rows:
-            w.writerow([r["name"], r["year"] or "", r["tmdb_id"] or "", r["watched_on"]])
+            rewatch = r["id"] in seen
+            seen.add(r["id"])
+            w.writerow([r["name"], r["year"] or "", r["tmdb_id"] or "", r["watched_on"],
+                        "true" if rewatch else "false"])
     return len(rows)
 
 
