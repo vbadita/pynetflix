@@ -167,6 +167,21 @@ def test_my_list_import_flags_removed(conn, tmp_path):
     assert import_my_list(conn, tmp_path / "nothing.csv") == 0
 
 
+def test_export_skips_malformed_rows(conn, tmp_path):
+    f = tmp_path / "ViewingActivity.csv"
+    f.write_text(
+        "Profile Name,Start Time,Duration,Attributes,Title,Supplemental Video Type,Device Type,"
+        "Bookmark,Latest Bookmark,Country\n"
+        "Ann,2024-01-02 20:00:00,01:30:00,,The Irishman,,TV,,,RO (Romania)\n"
+        "Ann,,01:30:00,,Dark: Season 1: Secrets,,TV,,,RO (Romania)\n"
+        "Ann,not a date,01:30:00,,Dark: Season 1: Lies,,TV,,,RO (Romania)\n"
+        ",2024-01-03 20:00:00,01:30:00,,Our Planet,,TV,,,RO (Romania)\n"
+    )
+    result = import_data_export(conn, f)
+    assert result.added == 1
+    assert result.skipped == 3
+
+
 def test_leaving_soon_uses_local_date(conn, monkeypatch):
     from pynetflix import db
     from pynetflix.availability import leaving_soon
