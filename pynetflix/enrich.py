@@ -5,6 +5,8 @@ import sqlite3
 from collections.abc import Container
 from dataclasses import dataclass
 
+import requests
+
 from . import db
 from .availability import record_availability
 from .parsing import normalize
@@ -17,6 +19,7 @@ class EnrichResult:
     not_found: int = 0
     reclassified: int = 0
     episodes_filled: int = 0
+    failed: int = 0  # TMDB lookups that errored; those titles are retried on the next run
 
 
 def _apply_details(conn: sqlite3.Connection, title_id: int, kind: str, d: dict) -> None:
@@ -66,6 +69,36 @@ def fill_episode_numbers(conn: sqlite3.Connection, tmdb: TMDB, title_id: int, tm
     return filled
 
 
+def _enrich_one(conn: sqlite3.Connection, tmdb: TMDB, country: str,
+                row: sqlite3.Row) -> tuple[int, bool, bool, int]:
+    """Enrich one title in its own transaction.
+
+    Returns (title_id, found on TMDB, re-classified as series, episode numbers filled)."""
+    with conn:
+        title_id, kind = row["id"], row["kind"]
+        tmdb_id = row["tmdb_id"]
+        reclassified = False
+        if not tmdb_id:
+            hit = tmdb.search(row["name"], kind)
+            if hit is None and kind == "movie":
+                series_id = db.merge_movie_into_series(conn, title_id)
+                if series_id:
+                    reclassified = True
+                    hit = tmdb.search(conn.execute("SELECT name FROM titles WHERE id = ?",
+                                                   (series_id,)).fetchone()["name"], "series")
+                    title_id, kind = series_id, "series"
+            if hit is None:
+                conn.execute("UPDATE titles SET enriched_at = ? WHERE id = ?", (db.today(), title_id))
+                return title_id, False, reclassified, 0
+            tmdb_id = hit["id"]
+        details = tmdb.details(tmdb_id, kind)
+        _apply_details(conn, title_id, kind, details)
+        filled = fill_episode_numbers(conn, tmdb, title_id, tmdb_id) if kind == "series" else 0
+        record_availability(conn, title_id, country,
+                            on_netflix(details.get("watch/providers", {}).get("results", {}), country))
+        return title_id, True, reclassified, filled
+
+
 def enrich_titles(conn: sqlite3.Connection, tmdb: TMDB, country: str,
                   refresh: bool = False, limit: int | None = None) -> EnrichResult:
     result = EnrichResult()
@@ -76,31 +109,21 @@ def enrich_titles(conn: sqlite3.Connection, tmdb: TMDB, country: str,
     if limit:
         query += f" LIMIT {int(limit)}"
     for row in conn.execute(query).fetchall():
-        with conn:
-            title_id, kind = row["id"], row["kind"]
-            tmdb_id = row["tmdb_id"]
-            if not tmdb_id:
-                hit = tmdb.search(row["name"], kind)
-                if hit is None and kind == "movie":
-                    series_id = db.merge_movie_into_series(conn, title_id)
-                    if series_id:
-                        result.reclassified += 1
-                        hit = tmdb.search(conn.execute("SELECT name FROM titles WHERE id = ?",
-                                                       (series_id,)).fetchone()["name"], "series")
-                        title_id, kind = series_id, "series"
-                if hit is None:
-                    conn.execute("UPDATE titles SET enriched_at = ? WHERE id = ?", (db.today(), title_id))
-                    result.not_found += 1
-                    continue
-                tmdb_id = hit["id"]
-            details = tmdb.details(tmdb_id, kind)
-            _apply_details(conn, title_id, kind, details)
+        try:
+            outcome = _enrich_one(conn, tmdb, country, row)
+        except requests.RequestException:
+            # A timeout or 5xx for one title shouldn't abort enriching all the others. The
+            # transaction is rolled back, so the title stays unenriched and is retried next run.
+            result.failed += 1
+            continue
+        title_id, found, reclassified, filled = outcome
+        result.reclassified += reclassified
+        result.episodes_filled += filled
+        if found:
             done.add(title_id)
-            if kind == "series":
-                result.episodes_filled += fill_episode_numbers(conn, tmdb, title_id, tmdb_id)
-            record_availability(conn, title_id, country,
-                                on_netflix(details.get("watch/providers", {}).get("results", {}), country))
             result.enriched += 1
+        else:
+            result.not_found += 1
     if not refresh:
         result.episodes_filled += backfill_episode_numbers(conn, tmdb, skip=done)
     return result

@@ -89,7 +89,8 @@ soon. Use it in cron instead of `check-availability`:
 
 If TMDB fails for a title (a timeout, a server error, an entry TMDB has deleted), that title
 keeps its previous status and is retried on the next run. The rest of the check still runs, and
-the number of skipped titles is printed to stderr.
+the number of skipped titles is printed to stderr. `enrich` works the same way: a title whose
+lookup fails is left unenriched and picked up by the next `enrich`.
 
 On the first run, titles removed long ago get a wide window, from your last watch to today.
 Availability differs by country. Unless `NETFLIX_COUNTRY` is set, pynetflix uses the country most common in

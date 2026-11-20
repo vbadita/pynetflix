@@ -212,6 +212,33 @@ def test_check_availability_survives_tmdb_errors(conn):
     assert report["failed"] == 1 and report["checked"] == total - 1
 
 
+def test_enrich_survives_tmdb_errors(conn):
+    import requests
+
+    class FlakyTMDB(FakeTMDB):
+        broken: set[str] = set()
+
+        def search(self, name, kind, year=None):
+            if name in self.broken:
+                raise requests.Timeout("Read timed out")
+            return super().search(name, kind, year)
+
+    import_viewing_activity_csv(conn, FIXTURES / "NetflixViewingHistory.csv", "Valentin")
+    tmdb = FlakyTMDB()
+    tmdb.broken = {"Dark"}
+    r = enrich_titles(conn, tmdb, "RO")
+    assert r.failed == 1 and r.enriched > 0
+    enriched = dict(conn.execute("SELECT name, enriched_at IS NOT NULL FROM titles").fetchall())
+    assert enriched["Dark"] == 0 and enriched["Stranger Things"] == 1
+
+    # Next run (TMDB is back): only Dark is left to do, and it gets enriched.
+    tmdb.broken = set()
+    r = enrich_titles(conn, tmdb, "RO")
+    assert (r.enriched, r.failed) == (1, 0)
+    dark = conn.execute("SELECT tmdb_id, netflix_status FROM titles WHERE name = 'Dark'").fetchone()
+    assert tuple(dark) == (FakeTMDB.CATALOG[("series", "dark")]["id"], "available")
+
+
 def test_local_hour_converts_utc_watch_times():
     bucharest_winter = timezone(timedelta(hours=2))
     assert stats._local_hour("2024-01-10T21:30:00Z", bucharest_winter) == 23
