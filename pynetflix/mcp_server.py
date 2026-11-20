@@ -31,12 +31,12 @@ def build_server(db_path: str | None = None):
                         kind: str | None = None, search: str | None = None, limit: int = 50) -> list[dict]:
         """Viewing history, newest first. kind is 'movie' or 'series'; search matches title or episode."""
         return stats.history(conn, profile=profile, since=since, until=until, kind=kind,
-                             search=search, limit=min(limit, 500))
+                             search=search, limit=max(1, min(limit, 500)))
 
     @server.tool()
     def search_titles(query: str, limit: int = 50) -> list[dict]:
         """Find titles by name, cast member or genre; every word in the query must match."""
-        return stats.search(conn, query, limit=min(limit, 500))
+        return stats.search(conn, query, limit=max(1, min(limit, 500)))
 
     @server.tool()
     def ratings(profile: str | None = None, rating: int | None = None) -> list[dict]:

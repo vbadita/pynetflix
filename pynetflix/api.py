@@ -51,7 +51,7 @@ def create_app(db_path: str | None = None) -> FastAPI:
     @app.get("/history")
     def get_history(response: Response, profile: str | None = None, since: str | None = None,
                     until: str | None = None, kind: str | None = Query(None, pattern="^(movie|series)$"),
-                    q: str | None = None, limit: int = Query(100, le=1000), offset: int = 0):
+                    q: str | None = None, limit: int = Query(100, ge=1, le=1000), offset: int = Query(0, ge=0)):
         response.headers["X-Total-Count"] = str(stats.history_count(
             conn, profile=profile, since=since, until=until, kind=kind, search=q))
         return stats.history(conn, profile=profile, since=since, until=until, kind=kind,
@@ -66,7 +66,8 @@ def create_app(db_path: str | None = None) -> FastAPI:
 
     @app.get("/profiles/{profile}/history")
     def get_profile_history(response: Response, profile: str, since: str | None = None,
-                            until: str | None = None, limit: int = Query(100, le=1000), offset: int = 0):
+                            until: str | None = None, limit: int = Query(100, ge=1, le=1000),
+                            offset: int = Query(0, ge=0)):
         response.headers["X-Total-Count"] = str(stats.history_count(
             conn, profile=profile, since=since, until=until))
         return stats.history(conn, profile=profile, since=since, until=until, limit=limit, offset=offset)
@@ -83,12 +84,12 @@ def create_app(db_path: str | None = None) -> FastAPI:
     def get_titles(response: Response,
                    status: str | None = Query(None, pattern="^(available|removed|unknown)$"),
                    kind: str | None = Query(None, pattern="^(movie|series)$"),
-                   limit: int = Query(200, le=2000), offset: int = 0):
+                   limit: int = Query(200, ge=1, le=2000), offset: int = Query(0, ge=0)):
         response.headers["X-Total-Count"] = str(stats.titles_count(conn, status=status, kind=kind))
         return stats.titles(conn, status=status, kind=kind, limit=limit, offset=offset)
 
     @app.get("/search")
-    def get_search(q: str = Query(..., min_length=1), limit: int = Query(50, le=500)):
+    def get_search(q: str = Query(..., min_length=1), limit: int = Query(50, ge=1, le=500)):
         return stats.search(conn, q, limit=limit)
 
     @app.get("/titles/removed")
