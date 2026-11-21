@@ -201,8 +201,9 @@ def wrapped(conn: sqlite3.Connection, profile: str | None = None, year: int | No
             FROM viewings v JOIN titles t ON t.id = v.title_id JOIN profiles p ON p.id = v.profile_id
             WHERE v.watched_on BETWEEN ? AND ?{profile_sql}""", params).fetchall()
 
+    # Keyed by title id, not name: a movie and a series can share a name ("Death Note").
     seconds_by_title: Counter = Counter()
-    kind_by_title: dict[str, str] = {}
+    info_by_title: dict[int, tuple[str, str]] = {}
     genres: Counter = Counter()
     days: Counter = Counter()
     weekdays: Counter = Counter()
@@ -212,8 +213,8 @@ def wrapped(conn: sqlite3.Connection, profile: str | None = None, year: int | No
     for r in rows:
         secs = _estimated_seconds(r)
         total += secs
-        seconds_by_title[r["title"]] += secs
-        kind_by_title[r["title"]] = r["kind"]
+        seconds_by_title[r["title_id"]] += secs
+        info_by_title[r["title_id"]] = (r["title"], r["kind"])
         for g in json.loads(r["genres"] or "[]"):
             genres[g] += secs
         days[r["watched_on"]] += secs
@@ -242,9 +243,10 @@ def wrapped(conn: sqlite3.Connection, profile: str | None = None, year: int | No
         "total_hours": round(total / 3600, 1),
         "viewings": len(rows),
         "titles": len(seconds_by_title),
-        "movies": sum(1 for k in kind_by_title.values() if k == "movie"),
-        "series": sum(1 for k in kind_by_title.values() if k == "series"),
-        "top_titles": [{"title": t, "hours": round(s / 3600, 1), "kind": kind_by_title[t]}
+        "movies": sum(1 for _, k in info_by_title.values() if k == "movie"),
+        "series": sum(1 for _, k in info_by_title.values() if k == "series"),
+        "top_titles": [{"title": info_by_title[t][0], "hours": round(s / 3600, 1),
+                        "kind": info_by_title[t][1]}
                        for t, s in seconds_by_title.most_common(10)],
         "top_genres": [{"genre": g, "hours": round(s / 3600, 1)} for g, s in genres.most_common(5)],
         "busiest_day": ({"date": days.most_common(1)[0][0],

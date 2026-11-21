@@ -380,3 +380,21 @@ def test_connect_moves_old_utc_dates_to_local_days(tmp_path, monkeypatch):
     # Re-importing the export now lines up with the migrated rows instead of duplicating them.
     r = import_data_export(conn, export)
     assert (r.added, r.merged) == (0, 3)
+
+
+def test_wrapped_keeps_movie_and_series_with_same_name_apart(conn, tmp_path):
+    # "Death Note" is both a movie and a series on Netflix: two titles, not one.
+    path = tmp_path / "ViewingActivity.csv"
+    path.write_text(
+        "Profile Name,Start Time,Duration,Attributes,Title,Supplemental Video Type,Device Type,"
+        "Bookmark,Latest Bookmark,Country\n"
+        "Valentin,2024-02-01 20:00:00,01:40:00,,Death Note,,TV,,,RO (Romania)\n"
+        "Valentin,2024-02-02 20:00:00,00:25:00,,Death Note: Season 1: Rebirth,,TV,,,RO (Romania)\n"
+        "Valentin,2024-02-03 20:00:00,00:25:00,,Death Note: Season 1: Confrontation,,TV,,,RO (Romania)\n"
+    )
+    import_data_export(conn, path)
+
+    w = stats.wrapped(conn, year=2024)
+    assert (w["titles"], w["movies"], w["series"]) == (2, 1, 1)
+    assert sorted((t["title"], t["kind"], t["hours"]) for t in w["top_titles"]) == [
+        ("Death Note", "movie", 1.7), ("Death Note", "series", 0.8)]
