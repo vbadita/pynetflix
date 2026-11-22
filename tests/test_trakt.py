@@ -164,3 +164,50 @@ def test_push_asks_for_login_when_refresh_rejected(conn, tmp_path, monkeypatch):
     with pytest.raises(RuntimeError, match="trakt login"):
         t.push_history(conn)
     assert len(session.calls) == 1
+
+
+def device_code(**kw):
+    return FakeResponse(body={"verification_url": "u", "user_code": "X", "device_code": "d",
+                              "expires_in": 600, "interval": 5, **kw})
+
+
+def test_login_slows_down_when_asked(tmp_path, monkeypatch):
+    sleeps = []
+    monkeypatch.setattr(exporters.time, "sleep", sleeps.append)
+    session = FakeSession(responses=[
+        device_code(),
+        FakeResponse(status_code=429),  # slow down
+        FakeResponse(status_code=400),  # still pending
+        FakeResponse(body={"access_token": "newtok"}),
+    ])
+    t = make_trakt(tmp_path, session, token=False)
+    t.login(prompt=lambda m: None)
+    assert sleeps == [5, 10, 10]
+    assert json.loads(t.token_path.read_text())["access_token"] == "newtok"
+
+
+@pytest.mark.parametrize("status, reason", [(404, "invalid"), (409, "already used"),
+                                            (410, "expired"), (418, "denied")])
+def test_login_stops_on_final_answer(tmp_path, monkeypatch, status, reason):
+    monkeypatch.setattr(exporters.time, "sleep", lambda s: None)
+    session = FakeSession(responses=[device_code(), FakeResponse(status_code=status)],
+                          default=FakeResponse(body={"access_token": "never"}))
+    t = make_trakt(tmp_path, session, token=False)
+    with pytest.raises(RuntimeError, match=reason):
+        t.login(prompt=lambda m: None)
+    assert len(session.calls) == 2  # gave up instead of polling until the code expires
+    assert not t.token_path.exists()
+
+
+def test_cli_trakt_errors_exit_cleanly(tmp_path, monkeypatch):
+    from pynetflix import cli
+    monkeypatch.setenv("PYNETFLIX_HOME", str(tmp_path))
+    monkeypatch.setenv("TRAKT_CLIENT_ID", "cid")
+    monkeypatch.setenv("TRAKT_CLIENT_SECRET", "secret")
+
+    def not_logged_in(self, *args, **kwargs):
+        raise RuntimeError("Not logged in to Trakt. Run: pynetflix trakt login")
+
+    monkeypatch.setattr(Trakt, "push_history", not_logged_in)
+    with pytest.raises(SystemExit, match="Not logged in to Trakt"):
+        cli.main(["--db", str(tmp_path / "t.db"), "trakt", "push"])

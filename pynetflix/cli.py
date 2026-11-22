@@ -248,11 +248,14 @@ def main(argv: list[str] | None = None) -> None:
         if not (cfg.trakt_client_id and cfg.trakt_client_secret):
             sys.exit("Set TRAKT_CLIENT_ID and TRAKT_CLIENT_SECRET (create an app at https://trakt.tv/oauth/applications)")
         trakt = Trakt(cfg.trakt_client_id, cfg.trakt_client_secret, cfg.trakt_token_path)
-        if args.action == "login":
-            trakt.login()
-            print("Trakt connected.")
-        else:
-            _print(trakt.push_history(conn, profile=args.profile, since=args.since))
+        try:
+            if args.action == "login":
+                trakt.login()
+                print("Trakt connected.")
+            else:
+                _print(trakt.push_history(conn, profile=args.profile, since=args.since))
+        except (RuntimeError, TimeoutError) as e:  # not logged in, denied, expired: no traceback
+            sys.exit(str(e))
 
     elif args.cmd == "serve":
         import uvicorn
