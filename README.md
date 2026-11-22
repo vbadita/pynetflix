@@ -115,7 +115,7 @@ your imported data-export viewings (falling back to `US` when there are none).
 | `abandoned` | Shows you stopped watching, flagging those with a new season out |
 | `shared` | Overlap between profiles and "watch together" suggestions |
 | `letterboxd OUT.csv` | Letterboxd import file (movies; one diary entry per watch, rewatches flagged; use `--profile` for one person's diary) |
-| `trakt login` / `trakt push` | Sync history to Trakt (needs `TRAKT_CLIENT_ID` / `TRAKT_CLIENT_SECRET`). `push` refreshes an expiring Trakt token by itself, so `login` is only needed once |
+| `trakt login` / `trakt push` | Sync history to Trakt (needs `TRAKT_CLIENT_ID` / `TRAKT_CLIENT_SECRET`). `push` refreshes an expiring Trakt token by itself, so `login` is only needed once. `login` stops with a clear message if the code is denied or expires, and backs off if Trakt asks it to poll more slowly |
 | `serve` | REST API (FastAPI): `/profiles`, `/history`, `/titles`, `/titles/removed`, `/ratings`, `/wrapped`, `/wrapped.html` (with previous/next month and year links), ... Paged endpoints (`/history`, `/profiles/{name}/history`, `/titles`) return the total number of matches in an `X-Total-Count` header, so `limit`/`offset` clients know when to stop. |
 | `mcp` | MCP server for assistants |
 

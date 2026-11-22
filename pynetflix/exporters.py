@@ -12,6 +12,14 @@ import requests
 TRAKT_API = "https://api.trakt.tv"
 TRAKT_REDIRECT_URI = "urn:ietf:wg:oauth:2.0:oob"  # what device-flow apps use
 TOKEN_REFRESH_MARGIN = 3600  # refresh this many seconds before the access token expires
+DEVICE_SLOW_DOWN_SECONDS = 5  # RFC 8628: add this to the poll interval on "slow down"
+# Final answers from Trakt's device token endpoint (anything else unexpected is raised as-is).
+DEVICE_CODE_ERRORS = {
+    404: "the device code is invalid",
+    409: "the code was already used",
+    410: "the code expired before it was approved",
+    418: "access was denied on trakt.tv",
+}
 
 EXPORT_COLUMNS = ["profile", "watched_on", "watched_at", "title", "kind", "season_number",
                   "episode_number", "episode_title", "duration_seconds", "device", "year",
@@ -76,17 +84,25 @@ class Trakt:
         code = self.session.post(f"{TRAKT_API}/oauth/device/code", json={"client_id": self.client_id}).json()
         prompt(f"Go to {code['verification_url']} and enter the code: {code['user_code']}")
         deadline = time.time() + code["expires_in"]
+        interval = code["interval"]
         while time.time() < deadline:
-            time.sleep(code["interval"])
+            time.sleep(interval)
             resp = self.session.post(f"{TRAKT_API}/oauth/device/token", json={
                 "code": code["device_code"], "client_id": self.client_id,
                 "client_secret": self.client_secret})
             if resp.status_code == 200:
                 self._save_token(resp.json())
                 return
-            if resp.status_code not in (400, 429):  # 400 = still pending
-                resp.raise_for_status()
-        raise TimeoutError("Trakt device code expired before it was approved")
+            if resp.status_code == 400:  # still waiting for the user to approve
+                continue
+            if resp.status_code == 429:  # polling too fast: back off, as the device flow asks
+                interval += DEVICE_SLOW_DOWN_SECONDS
+                continue
+            if resp.status_code in DEVICE_CODE_ERRORS:
+                raise RuntimeError(f"Trakt login failed: {DEVICE_CODE_ERRORS[resp.status_code]}. "
+                                   "Run: pynetflix trakt login")
+            resp.raise_for_status()
+        raise TimeoutError("Trakt device code expired before it was approved. Run: pynetflix trakt login")
 
     def _save_token(self, token: dict) -> None:
         self.token_path.write_text(json.dumps(token))
