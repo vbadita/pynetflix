@@ -31,8 +31,20 @@ class ImportResult:
                 f"{self.skipped} skipped, profiles: {', '.join(sorted(self.profiles)) or '-'}")
 
 
+def _parses(value: str, fmt: str) -> bool:
+    try:
+        datetime.strptime(value, fmt)
+    except ValueError:
+        return False
+    return True
+
+
 def detect_date_format(values: list[str]) -> str:
-    """Pick the first format that parses every value (US m/d/y wins ties, like Netflix US)."""
+    """Pick the first format that parses every value (US m/d/y wins ties, like Netflix US).
+
+    Values no known format can read (blank cells, stray junk) are ignored so that one bad row
+    doesn't hide the format of all the others."""
+    values = [v for v in values if any(_parses(v, f) for f in _CSV_DATE_FORMATS)] or values
     for fmt in _CSV_DATE_FORMATS:
         try:
             for v in values:
@@ -51,11 +63,16 @@ def import_viewing_activity_csv(conn: sqlite3.Connection, path: Path | str, prof
     result = ImportResult(profiles={profile})
     if not rows:
         return result
-    fmt = date_format or detect_date_format([r["Date"] for r in rows])
+    dates = [(r.get("Date") or "").strip() for r in rows]
+    fmt = date_format or detect_date_format(dates)
     profile_id = db.get_or_create_profile(conn, profile)
     with conn:
-        for r in rows:
-            watched_on = datetime.strptime(r["Date"], fmt).date().isoformat()
+        for r, raw_date in zip(rows, dates, strict=True):
+            try:
+                watched_on = datetime.strptime(raw_date, fmt).date().isoformat()
+            except ValueError:
+                result.skipped += 1  # blank or malformed date: don't abort the whole import
+                continue
             parsed = parse_title(r["Title"])
             title_id = db.get_or_create_title(conn, parsed)
             new = db.upsert_viewing(conn, profile_id=profile_id, title_id=title_id, parsed=parsed,
