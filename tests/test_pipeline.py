@@ -107,6 +107,25 @@ def test_movie_with_colon_reclassified_as_series(conn):
         path.unlink()
 
 
+def test_csv_import_skips_bad_dates(conn, tmp_path):
+    # One blank and one garbled date used to make format detection fail, or abort the import
+    # half way (rolling back every good row) with a ValueError.
+    path = tmp_path / "NetflixViewingHistory.csv"
+    path.write_text('Title,Date\n"The Irishman","2/1/24"\n"Roma",""\n'
+                    '"Dark: Season 1: Secrets","not a date"\n"Dark: Season 1: Lies","3/15/24"\n')
+    r = import_viewing_activity_csv(conn, path, "Valentin")
+    assert (r.added, r.skipped) == (2, 2)
+    dates = sorted(row[0] for row in conn.execute("SELECT watched_on FROM viewings"))
+    assert dates == ["2024-02-01", "2024-03-15"]
+
+
+def test_csv_import_unrecognisable_dates_still_error(conn, tmp_path):
+    path = tmp_path / "NetflixViewingHistory.csv"
+    path.write_text('Title,Date\n"The Irishman","yesterday"\n')
+    with pytest.raises(ValueError, match="date format"):
+        import_viewing_activity_csv(conn, path, "Valentin")
+
+
 def test_ratings_import(conn):
     from pynetflix.importers import import_ratings
     import_data_export(conn, FIXTURES / "netflix-report.zip")
