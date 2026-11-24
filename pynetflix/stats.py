@@ -208,7 +208,9 @@ def wrapped(conn: sqlite3.Connection, profile: str | None = None, year: int | No
     days: Counter = Counter()
     weekdays: Counter = Counter()
     hours: Counter = Counter()
-    episodes_per_day: Counter = Counter()
+    # (day, title id) -> distinct episodes. Two profiles watching the same episode that day
+    # (or the "Everyone" view adding them up) is still one episode of the binge.
+    episodes_per_day: defaultdict[tuple[str, int], set[str]] = defaultdict(set)
     total = 0
     for r in rows:
         secs = _estimated_seconds(r)
@@ -222,7 +224,8 @@ def wrapped(conn: sqlite3.Connection, profile: str | None = None, year: int | No
         if r["watched_at"]:
             hours[_local_hour(r["watched_at"])] += 1
         if r["kind"] == "series":
-            episodes_per_day[(r["watched_on"], r["title"])] += 1
+            # dedup_key is "title|season|episode|YYYY-MM-DD": the part before the date names the episode.
+            episodes_per_day[(r["watched_on"], r["title_id"])].add(r["dedup_key"][:-11])
 
     # Longest run of consecutive days with something watched.
     streak = best = 0
@@ -233,7 +236,8 @@ def wrapped(conn: sqlite3.Connection, profile: str | None = None, year: int | No
         best = max(best, streak)
         prev = cur
 
-    biggest_binge = max(episodes_per_day.items(), key=lambda kv: kv[1], default=None)
+    biggest_binge = max(((day, info_by_title[tid][0], len(eps)) for (day, tid), eps in episodes_per_day.items()),
+                        key=lambda b: b[2], default=None)
     late_night = sum(c for h, c in hours.items() if h >= 23 or h < 4)
     return {
         "period": {"from": start.isoformat(), "to": end.isoformat()},
@@ -253,8 +257,8 @@ def wrapped(conn: sqlite3.Connection, profile: str | None = None, year: int | No
                          "hours": round(days.most_common(1)[0][1] / 3600, 1)} if days else None),
         "favourite_weekday": weekdays.most_common(1)[0][0] if weekdays else None,
         "longest_streak_days": best,
-        "biggest_binge": ({"date": biggest_binge[0][0], "title": biggest_binge[0][1],
-                           "episodes": biggest_binge[1]} if biggest_binge else None),
+        "biggest_binge": ({"date": biggest_binge[0], "title": biggest_binge[1],
+                           "episodes": biggest_binge[2]} if biggest_binge else None),
         "night_owl_share": round(late_night / sum(hours.values()), 2) if hours else None,
         "watched_then_removed": sorted({r["title"] for r in rows if r["netflix_status"] == "removed"}),
         "duration_is_estimated": any(not r["duration_seconds"] for r in rows),

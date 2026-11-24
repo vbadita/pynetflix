@@ -417,3 +417,21 @@ def test_wrapped_keeps_movie_and_series_with_same_name_apart(conn, tmp_path):
     assert (w["titles"], w["movies"], w["series"]) == (2, 1, 1)
     assert sorted((t["title"], t["kind"], t["hours"]) for t in w["top_titles"]) == [
         ("Death Note", "movie", 1.7), ("Death Note", "series", 0.8)]
+
+
+def test_wrapped_binge_counts_each_episode_once_across_profiles(conn, tmp_path):
+    # Two profiles watch the same two episodes on the same evening: the "Everyone" recap
+    # binged 2 episodes, not 4; a third episode only one profile watched still counts.
+    path = tmp_path / "ViewingActivity.csv"
+    header = ("Profile Name,Start Time,Duration,Attributes,Title,Supplemental Video Type,Device Type,"
+              "Bookmark,Latest Bookmark,Country\n")
+    rows = [f"{who},2024-03-15 {hour}:00:00,00:50:00,,Dark: Season 1: {ep},,TV,,,RO (Romania)\n"
+            for who in ("Valentin", "Ana") for hour, ep in (("20", "Secrets"), ("21", "Lies"))]
+    rows.append("Ana,2024-03-15 22:00:00,00:50:00,,Dark: Season 1: Past and Present,,TV,,,RO (Romania)\n")
+    path.write_text(header + "".join(rows))
+    import_data_export(conn, path)
+
+    assert stats.wrapped(conn, year=2024)["biggest_binge"] == {
+        "date": "2024-03-15", "title": "Dark", "episodes": 3}
+    assert stats.wrapped(conn, year=2024, profile="Valentin")["biggest_binge"]["episodes"] == 2
+    assert stats.wrapped(conn, year=2024, profile="Ana")["biggest_binge"]["episodes"] == 3
