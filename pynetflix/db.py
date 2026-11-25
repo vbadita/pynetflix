@@ -2,10 +2,11 @@
 
 import json
 import sqlite3
+from collections.abc import Callable
 from datetime import date, datetime, timezone, tzinfo
 from pathlib import Path
 
-from .parsing import ParsedTitle, normalize
+from .parsing import ParsedTitle, ascii_normalize, normalize, parse_title
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS profiles (
@@ -122,6 +123,10 @@ def connect(path: Path | str) -> sqlite3.Connection:
         with conn:
             _migrate_to_local_dates(conn)
             conn.execute("PRAGMA user_version = 1")
+    if conn.execute("PRAGMA user_version").fetchone()[0] < 2:
+        with conn:
+            _migrate_to_unicode_keys(conn)
+            conn.execute("PRAGMA user_version = 2")
     return conn
 
 
@@ -157,16 +162,88 @@ def _migrate_to_local_dates(conn: sqlite3.Connection) -> None:
                          (day, key, v["id"]))
             continue
         # Same episode on the same local day (e.g. already imported from the CSV): merge.
-        conn.execute(
-            """UPDATE viewings SET
-                   watched_at = COALESCE(MIN(watched_at, ?), watched_at, ?),
-                   duration_seconds = MAX(COALESCE(duration_seconds, 0), COALESCE(?, 0)),
-                   episode_number = COALESCE(episode_number, ?),
-                   device = COALESCE(device, ?), country = COALESCE(country, ?)
-               WHERE id = ?""",
-            (v["watched_at"], v["watched_at"], v["duration_seconds"], v["episode_number"],
-             v["device"], v["country"], clash["id"]))
-        conn.execute("DELETE FROM viewings WHERE id = ?", (v["id"],))
+        _merge_viewing(conn, v, clash["id"])
+
+
+def _merge_viewing(conn: sqlite3.Connection, v: sqlite3.Row, into_id: int) -> None:
+    """Fold viewing `v` into the viewing `into_id` (the same watch) and delete it."""
+    conn.execute(
+        """UPDATE viewings SET
+               watched_at = COALESCE(MIN(watched_at, ?), watched_at, ?),
+               duration_seconds = MAX(COALESCE(duration_seconds, 0), COALESCE(?, 0)),
+               episode_number = COALESCE(episode_number, ?),
+               device = COALESCE(device, ?), country = COALESCE(country, ?)
+           WHERE id = ?""",
+        (v["watched_at"], v["watched_at"], v["duration_seconds"], v["episode_number"],
+         v["device"], v["country"], into_id))
+    conn.execute("DELETE FROM viewings WHERE id = ?", (v["id"],))
+
+
+def _migrate_to_unicode_keys(conn: sqlite3.Connection) -> None:
+    """Older versions kept only a-z/0-9 in match keys; recompute them with normalize().
+
+    Without this, a title stored as "am lie" would no longer match "Amélie" on the next import
+    and every viewing with an accented episode title would be imported a second time.
+    """
+    titles = conn.execute("SELECT id, name, kind, normalized_name FROM titles").fetchall()
+    for t in titles:
+        key = normalize(t["name"])
+        if key == t["normalized_name"]:
+            continue
+        # "Amélie" and "Amelie" may already be two rows; leave the second on its old key.
+        if conn.execute("SELECT 1 FROM titles WHERE normalized_name = ? AND kind = ?",
+                        (key, t["kind"])).fetchone() is None:
+            conn.execute("UPDATE titles SET normalized_name = ? WHERE id = ?", (key, t["id"]))
+
+    # Names written entirely in another script ("鬼滅の刃", "오징어 게임") all had the key "",
+    # so every one of them was stored as a single title. Give each viewing its own title back,
+    # from the exact title text the CSV or data export gave it.
+    for t in titles:
+        if t["normalized_name"]:
+            continue
+        for v in conn.execute("SELECT * FROM viewings WHERE title_id = ? AND source IN ('csv', 'export')",
+                              (t["id"],)).fetchall():
+            parsed = parse_title(v["raw_title"])
+            title_id = get_or_create_title(conn, parsed)
+            if title_id == t["id"]:
+                continue
+            key = dedup_key(title_id, parsed, v["watched_on"])
+            clash = conn.execute("SELECT id FROM viewings WHERE profile_id = ? AND dedup_key = ?",
+                                 (v["profile_id"], key)).fetchone()
+            if clash is None:
+                conn.execute("UPDATE viewings SET title_id = ?, dedup_key = ? WHERE id = ?",
+                             (title_id, key, v["id"]))
+            else:
+                _merge_viewing(conn, v, clash["id"])
+
+    # An alias is the old key of a "Show: Episode" movie merged into the series "Show".
+    for a in conn.execute("SELECT a.normalized_name, a.title_id, t.name FROM title_aliases a "
+                          "JOIN titles t ON t.id = a.title_id").fetchall():
+        for (episode,) in conn.execute("SELECT DISTINCT episode_title FROM viewings "
+                                       "WHERE title_id = ? AND episode_title IS NOT NULL", (a["title_id"],)):
+            full = f"{a['name']}: {episode}"
+            if ascii_normalize(full) == a["normalized_name"]:
+                conn.execute("INSERT OR IGNORE INTO title_aliases (normalized_name, title_id) VALUES (?, ?)",
+                             (normalize(full), a["title_id"]))
+
+    moving = []
+    for v in conn.execute("SELECT * FROM viewings").fetchall():
+        parsed = ParsedTitle(name="", kind="", season_label=v["season_label"],
+                             season_number=v["season_number"], episode_title=v["episode_title"])
+        if v["dedup_key"] != dedup_key(v["title_id"], parsed, v["watched_on"], norm=ascii_normalize):
+            continue  # not a key this function knows how to rebuild
+        key = dedup_key(v["title_id"], parsed, v["watched_on"])
+        if key != v["dedup_key"]:
+            moving.append((v, key))
+    for v, _ in moving:
+        conn.execute("UPDATE viewings SET dedup_key = ? WHERE id = ?", (f"migrating|{v['id']}", v["id"]))
+    for v, key in moving:
+        clash = conn.execute("SELECT id FROM viewings WHERE profile_id = ? AND dedup_key = ?",
+                             (v["profile_id"], key)).fetchone()
+        if clash is None:
+            conn.execute("UPDATE viewings SET dedup_key = ? WHERE id = ?", (key, v["id"]))
+        else:
+            _merge_viewing(conn, v, clash["id"])
 
 
 def get_or_create_profile(conn: sqlite3.Connection, name: str, guid: str | None = None) -> int:
@@ -231,9 +308,11 @@ def merge_movie_into_series(conn: sqlite3.Connection, title_id: int) -> int | No
     return series_id
 
 
-def dedup_key(title_id: int, parsed: ParsedTitle, watched_on: str) -> str:
-    episode = normalize(parsed.episode_title or "")
-    season = parsed.season_number if parsed.season_number is not None else normalize(parsed.season_label or "")
+def dedup_key(title_id: int, parsed: ParsedTitle, watched_on: str,
+              norm: Callable[[str], str] | None = None) -> str:
+    norm = norm or normalize
+    episode = norm(parsed.episode_title or "")
+    season = parsed.season_number if parsed.season_number is not None else norm(parsed.season_label or "")
     return f"{title_id}|{season}|{episode}|{watched_on}"
 
 

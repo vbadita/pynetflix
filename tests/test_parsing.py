@@ -23,5 +23,11 @@ def test_parse_title(raw, name, kind, season, episode, ep_num):
 
 def test_helpers():
     assert normalize("Mission: Impossible") == "mission impossible"
+    assert normalize("Amélie") == normalize("AMELIE") == "amelie"
+    assert normalize("Pădurea Spânzuraților") == "padurea spanzuratilor"
+    # Other scripts are kept, not stripped to an empty key.
+    assert normalize("鬼滅の刃") == "鬼滅の刃"
+    assert normalize("오징어 게임: 시즌 1") == "오징어 게임 시즌 1"
+    assert normalize("鬼滅の刃") != normalize("오징어 게임")
     assert parse_duration("01:02:03") == 3723
     assert parse_duration("") is None
