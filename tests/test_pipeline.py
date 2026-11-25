@@ -1,3 +1,4 @@
+import sqlite3
 import time
 from datetime import date, timedelta, timezone
 
@@ -390,7 +391,7 @@ def test_connect_moves_old_utc_dates_to_local_days(tmp_path, monkeypatch):
     monkeypatch.setenv("TZ", "Europe/Bucharest")
     time.tzset()
     conn = db.connect(path)
-    assert conn.execute("PRAGMA user_version").fetchone()[0] == 1
+    assert conn.execute("PRAGMA user_version").fetchone()[0] >= 1
     rows = [(h["title"], h["watched_on"], h["duration_seconds"]) for h in stats.history(conn)]
     # Lies merges into the CSV's row; each Irishman viewing moves a day without merging.
     assert sorted(rows) == [("Dark", "2024-03-16", 20 * 60),
@@ -435,3 +436,64 @@ def test_wrapped_binge_counts_each_episode_once_across_profiles(conn, tmp_path):
         "date": "2024-03-15", "title": "Dark", "episodes": 3}
     assert stats.wrapped(conn, year=2024, profile="Valentin")["biggest_binge"]["episodes"] == 2
     assert stats.wrapped(conn, year=2024, profile="Ana")["biggest_binge"]["episodes"] == 3
+
+
+_EXPORT_HEADER = ("Profile Name,Start Time,Duration,Attributes,Title,Supplemental Video Type,Device Type,"
+                  "Bookmark,Latest Bookmark,Country\n")
+_NON_LATIN_ROWS = (
+    "Valentin,2024-04-01 20:00:00,01:40:00,,千と千尋の神隠し,,TV,,,JP (Japan)\n"
+    "Valentin,2024-04-02 20:00:00,02:00:00,,기생충,,TV,,,KR (South Korea)\n"
+    "Valentin,2024-04-03 20:00:00,00:50:00,,오징어 게임: 시즌 1: 무궁화 꽃이 피었습니다,,TV,,,KR (South Korea)\n"
+    "Valentin,2024-04-03 21:00:00,00:50:00,,오징어 게임: 시즌 1: 지옥,,TV,,,KR (South Korea)\n"
+)
+
+
+def test_titles_in_other_scripts_stay_apart(conn, tmp_path):
+    path = tmp_path / "ViewingActivity.csv"
+    path.write_text(_EXPORT_HEADER + _NON_LATIN_ROWS, encoding="utf-8")
+    r = import_data_export(conn, path)
+    assert r.added == 4
+    names = sorted((t["name"], t["kind"], t["view_count"]) for t in stats.titles(conn))
+    assert names == [("千と千尋の神隠し", "movie", 1), ("기생충", "movie", 1), ("오징어 게임", "series", 2)]
+
+
+def test_accented_titles_match_across_sources(conn, tmp_path):
+    csv_path = tmp_path / "NetflixViewingHistory.csv"
+    csv_path.write_text('Title,Date\n"Élite: Season 1: Bienvenidos","4/1/24"\n', encoding="utf-8")
+    import_viewing_activity_csv(conn, csv_path, "Valentin")
+    export = tmp_path / "ViewingActivity.csv"
+    export.write_text(_EXPORT_HEADER +
+                      "Valentin,2024-04-01 20:00:00,00:50:00,,Elite: Season 1: Bienvenidos,,TV,,,ES (Spain)\n",
+                      encoding="utf-8")
+    r = import_data_export(conn, export)
+    assert (r.added, r.merged) == (0, 1)
+    assert len(stats.titles(conn)) == 1
+
+
+def test_connect_rebuilds_ascii_only_keys(tmp_path, monkeypatch):
+    from pynetflix import db
+    from pynetflix.parsing import ascii_normalize
+
+    path = tmp_path / "old.db"
+    export = tmp_path / "ViewingActivity.csv"
+    export.write_text(_EXPORT_HEADER + _NON_LATIN_ROWS +
+                      "Valentin,2024-04-04 20:00:00,00:50:00,,Élite: Season 1: Bienvenidos,,TV,,,ES (Spain)\n",
+                      encoding="utf-8")
+    with monkeypatch.context() as m:  # how older versions keyed titles and viewings
+        m.setattr(db, "normalize", ascii_normalize)
+        old = db.connect(path)
+        import_data_export(old, export)
+        with old:
+            old.execute("PRAGMA user_version = 1")
+        old.close()
+    # Both movies were folded into one title, and both episodes into one viewing.
+    assert sqlite3.connect(path).execute("SELECT COUNT(*) FROM titles").fetchone()[0] == 3
+
+    conn = db.connect(path)
+    assert conn.execute("PRAGMA user_version").fetchone()[0] == 2
+    names = sorted((t["name"], t["view_count"]) for t in stats.titles(conn))
+    assert names == [("Élite", 1), ("千と千尋の神隠し", 1), ("기생충", 1), ("오징어 게임", 1)]
+    # Re-importing lines up with the migrated rows, and brings back the episode that was lost.
+    r = import_data_export(conn, export)
+    assert (r.added, r.merged) == (1, 4)
+    assert len(stats.titles(conn)) == 4

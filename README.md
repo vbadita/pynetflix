@@ -50,6 +50,10 @@ data export and sync can all be combined. The data export gives the richest data
 timestamps, watch time, device and episode numbers. Its timestamps are UTC; viewings are
 dated by the local day (your machine's timezone, or `TZ`), the same way Netflix's Viewing
 Activity page dates them, so a 00:30 episode lands on the day you actually watched it.
+Titles are matched ignoring case, accents and punctuation ("Élite" and "Elite" are one show),
+and names in any script (Japanese, Korean, ...) are kept apart. Databases from older versions,
+which folded all non-Latin titles into one, are repaired on first open; re-import the data export
+afterwards to get back viewings that were lost to that.
 
 ## "Removed from Netflix" column
 

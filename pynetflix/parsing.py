@@ -6,6 +6,7 @@ There is no explicit movie/series flag, so we use the season marker.
 """
 
 import re
+import unicodedata
 from dataclasses import dataclass
 
 _WORD_NUMBERS = {
@@ -92,7 +93,19 @@ def parse_title(raw: str) -> ParsedTitle:
 
 
 def normalize(name: str) -> str:
-    """Key used to match the same title across sources."""
+    """Key used to match the same title across sources.
+
+    Case, accents and punctuation are ignored ("Amélie" == "Amelie"), but letters from any
+    script are kept: dropping non-ASCII would give every Japanese or Korean title the same
+    empty key and fold them all into one.
+    """
+    decomposed = unicodedata.normalize("NFKD", name.casefold())
+    stripped = "".join(c for c in decomposed if not unicodedata.combining(c))
+    return unicodedata.normalize("NFC", re.sub(r"[\W_]+", " ", stripped)).strip()
+
+
+def ascii_normalize(name: str) -> str:
+    """The ASCII-only key older versions stored (only a-z and 0-9 survive). Used to migrate them."""
     return re.sub(r"[^a-z0-9]+", " ", name.lower()).strip()
 
 
