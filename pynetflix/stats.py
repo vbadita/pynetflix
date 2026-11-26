@@ -1,5 +1,6 @@
 """Queries and insights over the local database."""
 
+import calendar
 import json
 import sqlite3
 from collections import Counter, defaultdict
@@ -187,10 +188,19 @@ def _local_hour(watched_at: str, tz: tzinfo | None = None) -> int:
 
 def wrapped(conn: sqlite3.Connection, profile: str | None = None, year: int | None = None,
             month: int | None = None) -> dict:
-    """Spotify-Wrapped style recap for a year (or a single month)."""
-    year = year or date.today().year
+    """Spotify-Wrapped style recap for a year (or a single month).
+
+    Raises ValueError for a year outside 1-9999 or a month outside 1-12.
+    """
+    if year is None:
+        year = date.today().year
+    if not 1 <= year <= 9999:
+        raise ValueError(f"year must be between 1 and 9999, not {year}")
+    if month is not None and not 1 <= month <= 12:
+        raise ValueError(f"month must be between 1 and 12, not {month}")
     start = date(year, month or 1, 1)
-    end = (date(year + (month == 12), (month % 12) + 1, 1) if month else date(year + 1, 1, 1)) - timedelta(days=1)
+    # Last day of the period, without stepping into the next year (date(10000, 1, 1) doesn't exist).
+    end = date(year, month, calendar.monthrange(year, month)[1]) if month else date(year, 12, 31)
     params: list = [start.isoformat(), end.isoformat()]
     profile_sql = ""
     if profile:

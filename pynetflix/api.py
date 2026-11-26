@@ -29,9 +29,9 @@ def _wrapped_links(w: dict) -> list[tuple[str, str | None]]:
         py, pm = (year - 1, 12) if month == 1 else (year, month - 1)
         ny, nm = (year + 1, 1) if month == 12 else (year, month + 1)
         future = (ny, nm) > (today.year, today.month)
-        return [("← Previous month", url(py, pm)), (f"{year} in full", url(year)),
+        return [("← Previous month", url(py, pm) if py >= 1 else None), (f"{year} in full", url(year)),
                 ("Next month →", None if future else url(ny, nm))]
-    return [("← Previous year", url(year - 1)),
+    return [("← Previous year", url(year - 1) if year > 1 else None),
             ("Next year →", None if year >= today.year else url(year + 1))]
 
 
@@ -108,12 +108,12 @@ def create_app(db_path: str | None = None) -> FastAPI:
         return t
 
     @app.get("/wrapped")
-    def get_wrapped(profile: str | None = None, year: int | None = None,
+    def get_wrapped(profile: str | None = None, year: int | None = Query(None, ge=1, le=9999),
                     month: int | None = Query(None, ge=1, le=12)):
         return stats.wrapped(conn, profile=profile, year=year, month=month)
 
     @app.get("/wrapped.html", response_class=HTMLResponse)
-    def get_wrapped_html(profile: str | None = None, year: int | None = None,
+    def get_wrapped_html(profile: str | None = None, year: int | None = Query(None, ge=1, le=9999),
                          month: int | None = Query(None, ge=1, le=12)):
         w = stats.wrapped(conn, profile=profile, year=year, month=month)
         return render_wrapped(w, links=_wrapped_links(w))
