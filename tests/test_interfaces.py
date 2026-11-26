@@ -3,6 +3,7 @@ import csv
 import io
 import json
 
+import pytest
 from conftest import FIXTURES, FakeTMDB
 from fastapi.testclient import TestClient
 
@@ -165,3 +166,29 @@ def test_api_rejects_unbounded_paging_and_escapes_like(tmp_path):
     assert client.get("/history", params={"q": "%"}).json() == []
     assert client.get("/history", params={"q": "D_rk"}).json() == []
     assert client.get("/history", params={"q": "dark"}).json()
+
+
+def test_wrapped_rejects_out_of_range_periods(tmp_path):
+    path, conn = _seeded(tmp_path)
+    # The last year and month the calendar has still work: their period ends on 9999-12-31.
+    assert wrapped(conn, year=9999)["period"] == {"from": "9999-01-01", "to": "9999-12-31"}
+    assert wrapped(conn, year=9999, month=12)["period"] == {"from": "9999-12-01", "to": "9999-12-31"}
+    assert wrapped(conn, year=2024, month=2)["period"]["to"] == "2024-02-29"
+    # Year 0 used to be read as "this year"; it is invalid like any other out-of-range value.
+    for bad in [{"year": 0}, {"year": -1}, {"year": 10000}, {"year": 2024, "month": 13}, {"year": 2024, "month": 0}]:
+        with pytest.raises(ValueError):
+            wrapped(conn, **bad)
+
+    client = TestClient(create_app(str(path)))
+    assert client.get("/wrapped", params={"year": 9999}).status_code == 200
+    for q in [{"year": 0}, {"year": 10000}, {"year": 2024, "month": 13}]:
+        assert client.get("/wrapped", params=q).status_code == 422
+        assert client.get("/wrapped.html", params=q).status_code == 422
+    # No "previous" link out of year 1, where the calendar starts.
+    first = client.get("/wrapped.html", params={"year": 1, "month": 1}).text
+    assert "year=0" not in first and "month=2" in first
+
+    for argv in (["--year", "0"], ["--month", "13"]):
+        with pytest.raises(SystemExit) as exc:
+            cli.main(["--db", str(path), "wrapped", *argv])
+        assert exc.value.code != 0

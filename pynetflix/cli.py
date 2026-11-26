@@ -77,7 +77,8 @@ def main(argv: list[str] | None = None) -> None:
     p.add_argument("--removed", action="store_true", help="only titles no longer on Netflix")
 
     p = sub.add_parser("wrapped", help="yearly/monthly recap")
-    p.add_argument("--profile"); p.add_argument("--year", type=int); p.add_argument("--month", type=int)
+    p.add_argument("--profile"); p.add_argument("--year", type=int)
+    p.add_argument("--month", type=int, choices=range(1, 13), metavar="1-12")
     p.add_argument("--html", type=Path, help="write a shareable HTML page here")
 
     p = sub.add_parser("abandoned", help="shows you stopped watching")
@@ -219,7 +220,10 @@ def main(argv: list[str] | None = None) -> None:
         print(f"Wrote {len(rows)} rows to {args.out}")
 
     elif args.cmd == "wrapped":
-        w = stats.wrapped(conn, profile=args.profile, year=args.year, month=args.month)
+        try:
+            w = stats.wrapped(conn, profile=args.profile, year=args.year, month=args.month)
+        except ValueError as e:
+            sys.exit(str(e))
         if args.html:
             from .report import render_wrapped
             args.html.write_text(render_wrapped(w), encoding="utf-8")
