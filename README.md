@@ -91,7 +91,8 @@ soon. Use it in cron instead of `check-availability`:
 0 9 * * * TMDB_API_KEY=... NETFLIX_COUNTRY=RO pynetflix watch   # cron mails the output to you
 ```
 
-If TMDB fails for a title (a timeout, a server error, an entry TMDB has deleted), that title
+When TMDB rate-limits pynetflix, it waits as long as TMDB's `Retry-After` header asks (at most a
+minute) and retries. If TMDB fails for a title (a timeout, a server error, an entry TMDB has deleted), that title
 keeps its previous status and is retried on the next run. The rest of the check still runs, and
 the number of skipped titles is printed to stderr. `enrich` works the same way: a title whose
 lookup fails is left unenriched and picked up by the next `enrich`.
