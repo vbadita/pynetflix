@@ -1,6 +1,8 @@
 """Minimal TMDB client (https://developer.themoviedb.org). Free API key required."""
 
 import time
+from datetime import datetime, timezone
+from email.utils import parsedate_to_datetime
 
 import requests
 
@@ -8,6 +10,28 @@ API = "https://api.themoviedb.org/3"
 IMAGE_BASE = "https://image.tmdb.org/t/p/w342"
 # TMDB's watch-provider data comes from JustWatch. Netflix shows up under a few provider ids.
 NETFLIX_PROVIDER_IDS = {8, 175, 1796}  # Netflix, Netflix Kids, Netflix Standard with Ads
+MAX_RETRY_WAIT = 60  # never sleep longer than this on a 429, whatever Retry-After says
+
+
+def retry_after_seconds(value: str | None, default: float) -> float:
+    """Seconds to wait from a Retry-After header: delay-seconds ("2", "1.5") or an HTTP date.
+
+    Anything unreadable falls back to ``default``; the result is capped at MAX_RETRY_WAIT."""
+    wait = default
+    if value:
+        try:
+            wait = float(value)
+        except ValueError:
+            try:
+                when = parsedate_to_datetime(value)
+                if when.tzinfo is None:
+                    when = when.replace(tzinfo=timezone.utc)
+                wait = (when - datetime.now(timezone.utc)).total_seconds()
+            except (TypeError, ValueError, IndexError):
+                pass
+    if wait != wait:  # "nan" parses as a float
+        wait = default
+    return min(max(wait, 0.0), MAX_RETRY_WAIT)
 
 
 class TMDB:
@@ -24,7 +48,8 @@ class TMDB:
         for attempt in range(4):
             resp = self.session.get(f"{API}{path}", params={**self.params, **params}, timeout=20)
             if resp.status_code == 429:
-                time.sleep(int(resp.headers.get("Retry-After", 2 ** attempt)))
+                # A date or fractional Retry-After used to crash the whole run with ValueError.
+                time.sleep(retry_after_seconds(resp.headers.get("Retry-After"), 2 ** attempt))
                 continue
             resp.raise_for_status()
             return resp.json()

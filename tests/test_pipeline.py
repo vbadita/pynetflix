@@ -1,8 +1,10 @@
 import sqlite3
 import time
-from datetime import date, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
+from email.utils import format_datetime
 
 import pytest
+import requests
 from conftest import FIXTURES, FakeTMDB
 
 from pynetflix import stats
@@ -497,3 +499,57 @@ def test_connect_rebuilds_ascii_only_keys(tmp_path, monkeypatch):
     r = import_data_export(conn, export)
     assert (r.added, r.merged) == (1, 4)
     assert len(stats.titles(conn)) == 4
+
+
+class _Resp:
+    def __init__(self, status_code, headers=None, body=None):
+        self.status_code, self.headers, self._body = status_code, headers or {}, body or {}
+
+    def json(self):
+        return self._body
+
+    def raise_for_status(self):
+        if self.status_code >= 400:
+            raise requests.HTTPError(f"HTTP {self.status_code}")
+
+
+class _Session:
+    def __init__(self, responses):
+        self.headers, self.responses = {}, list(responses)
+
+    def get(self, url, **kw):
+        return self.responses.pop(0)
+
+
+@pytest.mark.parametrize("header", ["2", "1.5", "Wed, 21 Oct 2015 07:28:00 GMT", "soon", "nan", None])
+def test_tmdb_retries_429_whatever_the_retry_after_header_says(monkeypatch, header):
+    from pynetflix import tmdb as tmdb_mod
+    sleeps = []
+    monkeypatch.setattr(tmdb_mod.time, "sleep", sleeps.append)
+    headers = {"Retry-After": header} if header is not None else {}
+    client = tmdb_mod.TMDB("k" * 32, session=_Session([
+        _Resp(429, headers), _Resp(200, body={"results": [{"id": 7}]})]))
+    assert client.search("Dark", "series") == {"id": 7}
+    assert len(sleeps) == 1 and 0 <= sleeps[0] <= tmdb_mod.MAX_RETRY_WAIT
+
+
+def test_retry_after_seconds():
+    from pynetflix.tmdb import MAX_RETRY_WAIT, retry_after_seconds
+    assert retry_after_seconds("3", 1) == 3
+    assert retry_after_seconds("0.5", 1) == 0.5
+    assert retry_after_seconds("garbage", 4) == 4
+    assert retry_after_seconds(None, 2) == 2
+    assert retry_after_seconds("-5", 2) == 0
+    assert retry_after_seconds("86400", 2) == MAX_RETRY_WAIT
+    soon = format_datetime(datetime.now(timezone.utc) + timedelta(seconds=10), usegmt=True)
+    assert 8 <= retry_after_seconds(soon, 1) <= 10
+    assert retry_after_seconds("Wed, 21 Oct 2015 07:28:00 GMT", 1) == 0  # already past
+
+
+def test_tmdb_gives_up_after_repeated_429_with_a_request_error(monkeypatch):
+    """Enrich and check-availability only skip titles on RequestException, so this must be one."""
+    from pynetflix import tmdb as tmdb_mod
+    monkeypatch.setattr(tmdb_mod.time, "sleep", lambda s: None)
+    client = tmdb_mod.TMDB("k" * 32, session=_Session([_Resp(429, {"Retry-After": "x"})] * 4))
+    with pytest.raises(requests.RequestException):
+        client.search("Dark", "series")
