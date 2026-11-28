@@ -139,6 +139,22 @@ def test_ratings_import(conn):
     assert {h["profile"]: h["rating"] for h in irishman} == {"Valentin": -1, "Kids": 1}
 
 
+def test_ratings_import_skips_rows_without_profile(conn, tmp_path):
+    from pynetflix.importers import import_ratings
+    path = tmp_path / "Ratings.csv"
+    path.write_text(
+        "Profile Name,Title Name,Thumbs Value,Event Utc Ts\n"
+        "Valentin,Dark,3,2024-03-20 10:00:00\n"
+        ",Our Planet,2,2024-03-21 10:00:00\n"
+        "  ,Narcos,1,2024-03-22 10:00:00\n", encoding="utf-8")
+    assert import_ratings(conn, path) == 1
+    assert [p["name"] for p in stats.profiles(conn)] == ["Valentin"]
+
+    # An export without a Profile Name column at all is skipped, not a KeyError.
+    path.write_text("Title Name,Thumbs Value\nDark,2\n", encoding="utf-8")
+    assert import_ratings(conn, path) == 0
+
+
 def test_watch_reports_changes(conn):
     from pynetflix.availability import record_leaving_notice, watch
     import_viewing_activity_csv(conn, FIXTURES / "NetflixViewingHistory.csv", "Valentin")
