@@ -110,11 +110,12 @@ def import_ratings(conn: sqlite3.Connection, path: Path | str) -> int:
         for r in csv.DictReader(f):
             rating = THUMBS.get((r.get("Thumbs Value") or "").strip())
             name = (r.get("Title Name") or "").strip()
-            if rating is None or not name:
-                continue
+            profile = (r.get("Profile Name") or "").strip()
+            if rating is None or not name or not profile:
+                continue  # star ratings, or rows with no title or profile to attach them to
             parsed = parse_title(name)
             title_id = db.get_or_create_title(conn, parsed)
-            profile_id = db.get_or_create_profile(conn, r["Profile Name"])
+            profile_id = db.get_or_create_profile(conn, profile)
             rated_at = (r.get("Event Utc Ts") or "").strip() or None
             conn.execute(
                 "INSERT INTO ratings (profile_id, title_id, rating, rated_at) VALUES (?, ?, ?, ?) "
